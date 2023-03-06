@@ -5,6 +5,13 @@
 #include <windows.h>
 
 
+extern BOOL g_blt_use_avx;
+
+void blt_copy(
+    unsigned char* dst,
+    unsigned char* src,
+    size_t size);
+
 void blt_clean(
     unsigned char* dst,
     int dst_x,
@@ -64,6 +71,11 @@ void blt_colorkey_mirror_stretch(
     BOOL mirror_up_down,
     BOOL mirror_left_right,
     int bpp);
+
+void blt_clear(
+    unsigned char* dst, 
+    char color,
+    size_t size);
 
 void blt_colorfill(
     unsigned char* dst,

@@ -36,6 +36,8 @@ BOOL WINAPI DllMain(HANDLE hDll, DWORD dwReason, LPVOID lpReserved)
 
         if (GetEnvironmentVariable("__COMPAT_LAYER", buf, sizeof(buf)))
         {
+            TRACE("__COMPAT_LAYER = %s\n", buf);
+
             char* s = strtok(buf, " ");
 
             while (s)

@@ -39,7 +39,8 @@ HRESULT dds_Blt(
     dbg_dump_dds_blt_flags(dwFlags);
     dbg_dump_dds_blt_fx_flags((dwFlags & DDBLT_DDFX) && lpDDBltFx ? lpDDBltFx->dwDDFX : 0);
 
-    if (g_ddraw->iskkndx &&
+    if (g_ddraw && 
+        g_ddraw->iskkndx &&
         (dwFlags & DDBLT_COLORFILL) &&
         lpDestRect &&
         lpDestRect->right == 640 &&
@@ -64,15 +65,102 @@ HRESULT dds_Blt(
     if (lpDestRect)
         memcpy(&dst_rect, lpDestRect, sizeof(dst_rect));
 
-    /* stretch or clip? */
-    BOOL is_stretch_blt =
-        ((src_rect.right - src_rect.left) != (dst_rect.right - dst_rect.left)) ||
-        ((src_rect.bottom - src_rect.top) != (dst_rect.bottom - dst_rect.top));
+    int src_w = src_rect.right - src_rect.left;
+    int src_h = src_rect.bottom - src_rect.top;
+
+    int dst_w = dst_rect.right - dst_rect.left;
+    int dst_h = dst_rect.bottom - dst_rect.top;
+
+    float scale_w = (src_w > 0 && dst_w > 0) ? (float)src_w / dst_w : 1.0f;
+    float scale_h = (src_h > 0 && dst_h > 0) ? (float)src_h / dst_h : 1.0f;
+
+    BOOL is_stretch_blt = src_w != dst_w || src_h != dst_h;
+
+    /* Disable this for now (needs more testing)
+    if (This->clipper && !(dwFlags & DDBLT_NO_CLIP) && dst_w > 0 && dst_h > 0)
+    {
+        DWORD size = 0;
+
+        if (SUCCEEDED(IDirectDrawClipper_GetClipList(This->clipper, &dst_rect, NULL, &size)))
+        {
+            RGNDATA* list = (RGNDATA*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+
+            if (list)
+            {
+                if (SUCCEEDED(IDirectDrawClipper_GetClipList(This->clipper, &dst_rect, list, &size)))
+                {
+                    RECT* dst_c_rect = (RECT*)list->Buffer;
+
+                    for (int i = 0; i < list->rdh.nCount; ++i)
+                    {
+                        RECT src_c_rect = src_rect;
+
+                        if (src_surface)
+                        {
+                            src_c_rect.left += (LONG)((dst_c_rect[i].left - dst_rect.left) * scale_w);
+                            src_c_rect.top += (LONG)((dst_c_rect[i].top - dst_rect.top) * scale_h);
+                            src_c_rect.right -= (LONG)((dst_rect.right - dst_c_rect[i].right) * scale_w);
+                            src_c_rect.bottom -= (LONG)((dst_rect.bottom - dst_c_rect[i].bottom) * scale_h);
+                        }
+
+                        dds_Blt(This, &dst_c_rect[i], src_surface, &src_c_rect, dwFlags | DDBLT_NO_CLIP, lpDDBltFx);
+                    }
+                }
+
+                HeapFree(GetProcessHeap(), 0, list);
+
+                return DD_OK;
+            }
+        }
+    }
+    */
+
+    if (dst_rect.right < 0)
+        dst_rect.right = 0;
+
+    if (dst_rect.left < 0)
+    {
+        src_rect.left += (LONG)(abs(dst_rect.left) * scale_w);
+        dst_rect.left = 0;
+    }
+
+    if (dst_rect.bottom < 0)
+        dst_rect.bottom = 0;
+
+    if (dst_rect.top < 0)
+    {
+        src_rect.top += (LONG)(abs(dst_rect.top) * scale_h);
+        dst_rect.top = 0;
+    }
+
+    if (dst_rect.right > This->width)
+    {
+        src_rect.right -= (LONG)((dst_rect.right - This->width) * scale_w);
+        dst_rect.right = This->width;
+    }
+
+    if (dst_rect.left > dst_rect.right)
+        dst_rect.left = dst_rect.right;
+
+    if (dst_rect.bottom > This->height)
+    {
+        src_rect.bottom -= (LONG)((dst_rect.bottom - This->height) * scale_h);
+        dst_rect.bottom = This->height;
+    }
+
+    if (dst_rect.top > dst_rect.bottom)
+        dst_rect.top = dst_rect.bottom;
 
     if (src_surface)
     {
+        if (src_rect.right < 0)
+            src_rect.right = 0;
+
         if (src_rect.left < 0)
             src_rect.left = 0;
+
+        if (src_rect.bottom < 0)
+            src_rect.bottom = 0;
 
         if (src_rect.top < 0)
             src_rect.top = 0;
@@ -90,31 +178,15 @@ HRESULT dds_Blt(
             src_rect.top = src_rect.bottom;
     }
 
-    if (dst_rect.left < 0)
-        dst_rect.left = 0;
+    src_w = src_rect.right - src_rect.left;
+    src_h = src_rect.bottom - src_rect.top;
 
-    if (dst_rect.top < 0)
-        dst_rect.top = 0;
-
-    if (dst_rect.right > This->width)
-        dst_rect.right = This->width;
-
-    if (dst_rect.left > dst_rect.right)
-        dst_rect.left = dst_rect.right;
-
-    if (dst_rect.bottom > This->height)
-        dst_rect.bottom = This->height;
-
-    if (dst_rect.top > dst_rect.bottom)
-        dst_rect.top = dst_rect.bottom;
-
-    int src_w = src_rect.right - src_rect.left;
-    int src_h = src_rect.bottom - src_rect.top;
     int src_x = src_rect.left;
     int src_y = src_rect.top;
 
-    int dst_w = dst_rect.right - dst_rect.left;
-    int dst_h = dst_rect.bottom - dst_rect.top;
+    dst_w = dst_rect.right - dst_rect.left;
+    dst_h = dst_rect.bottom - dst_rect.top;
+
     int dst_x = dst_rect.left;
     int dst_y = dst_rect.top;
 
@@ -124,18 +196,24 @@ HRESULT dds_Blt(
     if (dst_buf && (dwFlags & DDBLT_COLORFILL) && lpDDBltFx && dst_w > 0 && dst_h > 0)
     {
         blt_colorfill(
-            dst_buf, 
-            dst_x, 
-            dst_y, 
-            dst_w, 
-            dst_h, 
-            This->l_pitch, 
-            lpDDBltFx->dwFillColor, 
+            dst_buf,
+            dst_x,
+            dst_y,
+            dst_w,
+            dst_h,
+            This->pitch,
+            lpDDBltFx->dwFillColor,
             This->bpp);
     }
 
     if (src_surface && src_w > 0 && src_h > 0 && dst_w > 0 && dst_h > 0)
     {
+        if (!is_stretch_blt)
+        {
+            src_w = dst_w = min(src_w, dst_w);
+            src_h = dst_h = min(src_h, dst_h);
+        }
+
         BOOL got_fx = (dwFlags & DDBLT_DDFX) && lpDDBltFx;
         BOOL mirror_left_right = got_fx && (lpDDBltFx->dwDDFX & DDBLTFX_MIRRORLEFTRIGHT);
         BOOL mirror_up_down = got_fx && (lpDDBltFx->dwDDFX & DDBLTFX_MIRRORUPDOWN);
@@ -150,7 +228,62 @@ HRESULT dds_Blt(
             HDC src_dc;
             dds_GetDC(src_surface, &src_dc);
 
-            StretchBlt(dst_dc, dst_x, dst_y, dst_w, dst_h, src_dc, src_x, src_y, src_w, src_h, SRCCOPY);
+            if ((dwFlags & DDBLT_KEYSRC) || (dwFlags & DDBLT_KEYSRCOVERRIDE))
+            {
+                UINT color = 
+                    (dwFlags & DDBLT_KEYSRCOVERRIDE) ?
+                    lpDDBltFx->ddckSrcColorkey.dwColorSpaceLowValue : src_surface->color_key.dwColorSpaceLowValue;
+
+                if (src_surface->bpp == 32)
+                {
+                    color = color & 0xFFFFFF;
+                }
+                else if (src_surface->bpp == 16)
+                {
+                    unsigned short c = (unsigned short)color;
+
+                    BYTE r = ((c & 0xF800) >> 11) << 3;
+                    BYTE g = ((c & 0x07E0) >> 5) << 2;
+                    BYTE b = ((c & 0x001F)) << 3;
+
+                    color = RGB(r, g, b);
+                }
+                else if (src_surface->bpp == 8)
+                {
+                    RGBQUAD* quad =
+                        src_surface->palette ? src_surface->palette->data_rgb :
+                        g_ddraw && g_ddraw->primary && g_ddraw->primary->palette ? g_ddraw->primary->palette->data_rgb :
+                        NULL;
+
+                    if (quad)
+                    {
+                        unsigned char i = (unsigned char)color;
+
+                        color = RGB(quad[i].rgbRed, quad[i].rgbGreen, quad[i].rgbBlue);
+                    }                   
+                }
+
+                GdiTransparentBlt(dst_dc, dst_x, dst_y, dst_w, dst_h, src_dc, src_x, src_y, src_w, src_h, color);
+            }
+            else
+            {
+                real_StretchBlt(dst_dc, dst_x, dst_y, dst_w, dst_h, src_dc, src_x, src_y, src_w, src_h, SRCCOPY);
+            }
+
+            /*
+            StretchBlt(
+                dst_dc, 
+                lpDestRect->left, 
+                lpDestRect->top, 
+                lpDestRect->right - lpDestRect->left, 
+                lpDestRect->bottom - lpDestRect->top, 
+                src_dc, 
+                lpSrcRect->left, 
+                lpSrcRect->top, 
+                lpSrcRect->right - lpSrcRect->left, 
+                lpSrcRect->bottom - lpSrcRect->top, 
+                SRCCOPY);
+                */
         }
         else if (
             (dwFlags & DDBLT_KEYSRC) ||
@@ -174,7 +307,7 @@ HRESULT dds_Blt(
                     color_key.dwColorSpaceHighValue = color_key.dwColorSpaceLowValue;
             }
 
-            if (src_w == dst_w && src_h == dst_h && !mirror_left_right && !mirror_up_down)
+            if (!is_stretch_blt && !mirror_left_right && !mirror_up_down)
             {
                 blt_colorkey(
                     dst_buf,
@@ -182,11 +315,11 @@ HRESULT dds_Blt(
                     dst_y,
                     dst_w,
                     dst_h,
-                    This->l_pitch,
+                    This->pitch,
                     src_buf,
                     src_x,
                     src_y,
-                    src_surface->l_pitch,
+                    src_surface->pitch,
                     color_key.dwColorSpaceLowValue,
                     color_key.dwColorSpaceHighValue,
                     This->bpp);
@@ -199,13 +332,13 @@ HRESULT dds_Blt(
                     dst_y,
                     dst_w,
                     dst_h,
-                    This->l_pitch,
+                    This->pitch,
                     src_buf,
                     src_x,
                     src_y,
                     src_w,
                     src_h,
-                    src_surface->l_pitch,
+                    src_surface->pitch,
                     color_key.dwColorSpaceLowValue,
                     color_key.dwColorSpaceHighValue,
                     mirror_up_down,
@@ -213,7 +346,7 @@ HRESULT dds_Blt(
                     This->bpp);
             }
         }
-        else if (is_stretch_blt)
+        else if (is_stretch_blt && (src_w != dst_w || src_h != dst_h))
         {
             blt_stretch(
                 dst_buf,
@@ -221,13 +354,13 @@ HRESULT dds_Blt(
                 dst_y,
                 dst_w,
                 dst_h,
-                This->l_pitch,
+                This->pitch,
                 src_buf,
                 src_x,
                 src_y,
                 src_w,
                 src_h,
-                src_surface->l_pitch,
+                src_surface->pitch,
                 This->bpp);
         }
         else if (This == src_surface)
@@ -236,13 +369,13 @@ HRESULT dds_Blt(
                 dst_buf,
                 dst_x,
                 dst_y,
-                min(dst_w, src_w),
-                min(dst_h, src_h),
-                This->l_pitch,
+                dst_w,
+                dst_h,
+                This->pitch,
                 src_buf,
                 src_x,
                 src_y,
-                src_surface->l_pitch,
+                src_surface->pitch,
                 This->bpp);
         }
         else
@@ -251,18 +384,18 @@ HRESULT dds_Blt(
                 dst_buf,
                 dst_x,
                 dst_y,
-                min(dst_w, src_w),
-                min(dst_h, src_h),
-                This->l_pitch,
+                dst_w,
+                dst_h,
+                This->pitch,
                 src_buf,
                 src_x,
                 src_y,
-                src_surface->l_pitch,
+                src_surface->pitch,
                 This->bpp);
         }
     }
 
-    if ((This->caps & DDSCAPS_PRIMARYSURFACE) && g_ddraw->render.run)
+    if ((This->caps & DDSCAPS_PRIMARYSURFACE) && g_ddraw && g_ddraw->render.run)
     {
         InterlockedExchange(&g_ddraw->render.surface_updated, TRUE);
 
@@ -299,11 +432,33 @@ HRESULT dds_BltFast(
     RECT src_rect = { 0, 0, src_surface ? src_surface->width : 0, src_surface ? src_surface->height : 0 };
 
     if (lpSrcRect && src_surface)
-    {
         memcpy(&src_rect, lpSrcRect, sizeof(src_rect));
+
+    int dst_x = dwX;
+    int dst_y = dwY;
+
+    if (dst_x < 0)
+    {
+        src_rect.left += abs(dst_x);
+        dst_x = 0;
+    }
+
+    if (dst_y < 0)
+    {
+        src_rect.top += abs(dst_y);
+        dst_y = 0;
+    }
+
+    if (src_surface)
+    {
+        if (src_rect.right < 0)
+            src_rect.right = 0;
 
         if (src_rect.left < 0)
             src_rect.left = 0;
+
+        if (src_rect.bottom < 0)
+            src_rect.bottom = 0;
 
         if (src_rect.top < 0)
             src_rect.top = 0;
@@ -321,36 +476,19 @@ HRESULT dds_BltFast(
             src_rect.top = src_rect.bottom;
     }
 
-    int dst_x = dwX;
-    int dst_y = dwY;
-
-    if (dst_x < 0)
-    {
-        src_rect.left += abs(dst_x);
-
-        if (src_rect.left > src_rect.right)
-            src_rect.left = src_rect.right;
-
-        dst_x = 0;
-    }
-
-    if (dst_y < 0)
-    {
-        src_rect.top += abs(dst_y);
-
-        if (src_rect.top > src_rect.bottom)
-            src_rect.top = src_rect.bottom;
-
-        dst_y = 0;
-    }
-
     int src_x = src_rect.left;
     int src_y = src_rect.top;
 
     RECT dst_rect = { dst_x, dst_y, (src_rect.right - src_rect.left) + dst_x, (src_rect.bottom - src_rect.top) + dst_y };
 
+    if (dst_rect.right < 0)
+        dst_rect.right = 0;
+
     if (dst_rect.left < 0)
         dst_rect.left = 0;
+
+    if (dst_rect.bottom < 0)
+        dst_rect.bottom = 0;
 
     if (dst_rect.top < 0)
         dst_rect.top = 0;
@@ -369,6 +507,7 @@ HRESULT dds_BltFast(
 
     dst_x = dst_rect.left;
     dst_y = dst_rect.top;
+
     int dst_w = dst_rect.right - dst_rect.left;
     int dst_h = dst_rect.bottom - dst_rect.top;
 
@@ -387,7 +526,58 @@ HRESULT dds_BltFast(
             HDC src_dc;
             dds_GetDC(src_surface, &src_dc);
 
-            BitBlt(dst_dc, dst_x, dst_y, dst_w, dst_h, src_dc, src_x, src_y, SRCCOPY);
+            if (dwFlags & DDBLTFAST_SRCCOLORKEY)
+            {
+                UINT color = src_surface->color_key.dwColorSpaceLowValue;
+
+                if (src_surface->bpp == 32)
+                {
+                    color = color & 0xFFFFFF;
+                }
+                else if (src_surface->bpp == 16)
+                {
+                    unsigned short c = (unsigned short)color;
+
+                    BYTE r = ((c & 0xF800) >> 11) << 3;
+                    BYTE g = ((c & 0x07E0) >> 5) << 2;
+                    BYTE b = ((c & 0x001F)) << 3;
+
+                    color = RGB(r, g, b);
+                }
+                else if (src_surface->bpp == 8)
+                {
+                    RGBQUAD* quad =
+                        src_surface->palette ? src_surface->palette->data_rgb :
+                        g_ddraw && g_ddraw->primary && g_ddraw->primary->palette ? g_ddraw->primary->palette->data_rgb :
+                        NULL;
+
+                    if (quad)
+                    {
+                        unsigned char i = (unsigned char)color;
+
+                        color = RGB(quad[i].rgbRed, quad[i].rgbGreen, quad[i].rgbBlue);
+                    }
+                }
+
+                GdiTransparentBlt(dst_dc, dst_x, dst_y, dst_w, dst_h, src_dc, src_x, src_y, dst_w, dst_h, color);
+            }
+            else
+            {
+                BitBlt(dst_dc, dst_x, dst_y, dst_w, dst_h, src_dc, src_x, src_y, SRCCOPY);
+            }
+
+            /*
+            BitBlt(
+                dst_dc, 
+                dwX, 
+                dwY, 
+                lpSrcRect->right - lpSrcRect->left, 
+                lpSrcRect->bottom - lpSrcRect->top, 
+                src_dc, 
+                lpSrcRect->left, 
+                lpSrcRect->top, 
+                SRCCOPY);
+                */
         }
         else if (dwFlags & DDBLTFAST_SRCCOLORKEY)
         {
@@ -397,11 +587,11 @@ HRESULT dds_BltFast(
                 dst_y,
                 dst_w,
                 dst_h,
-                This->l_pitch,
+                This->pitch,
                 src_buf,
                 src_x,
                 src_y,
-                src_surface->l_pitch,
+                src_surface->pitch,
                 src_surface->color_key.dwColorSpaceLowValue,
                 src_surface->color_key.dwColorSpaceHighValue,
                 This->bpp);
@@ -414,11 +604,11 @@ HRESULT dds_BltFast(
                 dst_y,
                 dst_w,
                 dst_h,
-                This->l_pitch,
+                This->pitch,
                 src_buf,
                 src_x,
                 src_y,
-                src_surface->l_pitch,
+                src_surface->pitch,
                 This->bpp);
         }
         else
@@ -429,16 +619,16 @@ HRESULT dds_BltFast(
                 dst_y,
                 dst_w,
                 dst_h,
-                This->l_pitch,
+                This->pitch,
                 src_buf,
                 src_x,
                 src_y,
-                src_surface->l_pitch,
+                src_surface->pitch,
                 This->bpp);
         }
     }
 
-    if ((This->caps & DDSCAPS_PRIMARYSURFACE) && g_ddraw->render.run)
+    if ((This->caps & DDSCAPS_PRIMARYSURFACE) && g_ddraw && g_ddraw->render.run)
     {
         InterlockedExchange(&g_ddraw->render.surface_updated, TRUE);
 
@@ -448,6 +638,12 @@ HRESULT dds_BltFast(
             (This->last_flip_tick + FLIP_REDRAW_TIMEOUT < time && This->last_blt_tick + FLIP_REDRAW_TIMEOUT < time))
         {
             ReleaseSemaphore(g_ddraw->render.sem, 1, NULL);
+
+            if (g_ddraw->limit_bltfast && g_ddraw->ticks_limiter.tick_length > 0)
+            {
+                g_ddraw->ticks_limiter.use_blt_or_flip = TRUE;
+                util_limit_game_ticks();
+            }
         }
     }
 
@@ -476,17 +672,18 @@ HRESULT dds_GetSurfaceDesc(IDirectDrawSurfaceImpl* This, LPDDSURFACEDESC lpDDSur
         memset(lpDDSurfaceDesc, 0, size);
 
         lpDDSurfaceDesc->dwSize = size;
-        lpDDSurfaceDesc->dwFlags = DDSD_WIDTH | DDSD_HEIGHT | DDSD_PITCH | DDSD_PIXELFORMAT | DDSD_LPSURFACE;
+        lpDDSurfaceDesc->dwFlags = DDSD_WIDTH | DDSD_HEIGHT | DDSD_PITCH | DDSD_PIXELFORMAT | DDSD_LPSURFACE | DDSD_BACKBUFFERCOUNT;
         lpDDSurfaceDesc->dwWidth = This->width;
         lpDDSurfaceDesc->dwHeight = This->height;
-        lpDDSurfaceDesc->lPitch = This->l_pitch;
+        lpDDSurfaceDesc->lPitch = This->pitch;
         lpDDSurfaceDesc->lpSurface = dds_GetBuffer(This);
         lpDDSurfaceDesc->ddpfPixelFormat.dwSize = sizeof(DDPIXELFORMAT);
         lpDDSurfaceDesc->ddpfPixelFormat.dwFlags = DDPF_RGB;
         lpDDSurfaceDesc->ddpfPixelFormat.dwRGBBitCount = This->bpp;
         lpDDSurfaceDesc->ddsCaps.dwCaps = This->caps;
+        lpDDSurfaceDesc->dwBackBufferCount = This->backbuffer_count;
 
-        if (!g_ddraw->novidmem || (This->caps & (DDSCAPS_PRIMARYSURFACE | DDSCAPS_BACKBUFFER)))
+        if ((g_ddraw && !g_ddraw->novidmem) || (This->caps & (DDSCAPS_PRIMARYSURFACE | DDSCAPS_BACKBUFFER)))
         {
             lpDDSurfaceDesc->ddsCaps.dwCaps |= DDSCAPS_VIDEOMEMORY;
         }
@@ -533,6 +730,8 @@ HRESULT dds_EnumAttachedSurfaces(
 
 HRESULT dds_Flip(IDirectDrawSurfaceImpl* This, IDirectDrawSurfaceImpl* lpDDSurfaceTargetOverride, DWORD dwFlags)
 {
+    dbg_dump_dds_flip_flags(dwFlags);
+
     if (This->backbuffer)
     {
         EnterCriticalSection(&g_ddraw->cs);
@@ -541,14 +740,16 @@ HRESULT dds_Flip(IDirectDrawSurfaceImpl* This, IDirectDrawSurfaceImpl* lpDDSurfa
         void* buf = InterlockedExchangePointer(&This->surface, backbuffer->surface);
         HBITMAP bitmap = (HBITMAP)InterlockedExchangePointer(&This->bitmap, backbuffer->bitmap);
         HDC dc = (HDC)InterlockedExchangePointer(&This->hdc, backbuffer->hdc);
+        HANDLE map = (HANDLE)InterlockedExchangePointer(&This->mapping, backbuffer->mapping);
 
         InterlockedExchangePointer(&backbuffer->surface, buf);
         InterlockedExchangePointer(&backbuffer->bitmap, bitmap);
         InterlockedExchangePointer(&backbuffer->hdc, dc);
+        InterlockedExchangePointer(&backbuffer->mapping, map);
 
         if (g_ddraw->flipclear)
         {
-            memset(buf, 0, backbuffer->size);
+            blt_clear(buf, 0, backbuffer->size);
         }
 
         LeaveCriticalSection(&g_ddraw->cs);
@@ -559,7 +760,7 @@ HRESULT dds_Flip(IDirectDrawSurfaceImpl* This, IDirectDrawSurfaceImpl* lpDDSurfa
         }
     }
 
-    if (This->caps & DDSCAPS_PRIMARYSURFACE && g_ddraw->render.run)
+    if ((This->caps & DDSCAPS_PRIMARYSURFACE) && g_ddraw && g_ddraw->render.run)
     {
         This->last_flip_tick = timeGetTime();
 
@@ -584,7 +785,7 @@ HRESULT dds_Flip(IDirectDrawSurfaceImpl* This, IDirectDrawSurfaceImpl* lpDDSurfa
 
 HRESULT dds_GetAttachedSurface(IDirectDrawSurfaceImpl* This, LPDDSCAPS lpDdsCaps, IDirectDrawSurfaceImpl** lpDDsurface)
 {
-    if ((This->caps & DDSCAPS_PRIMARYSURFACE) && (This->caps & DDSCAPS_FLIP) && (lpDdsCaps->dwCaps & DDSCAPS_BACKBUFFER))
+    if (lpDdsCaps->dwCaps & DDSCAPS_BACKBUFFER)
     {
         if (This->backbuffer)
         {
@@ -596,14 +797,20 @@ HRESULT dds_GetAttachedSurface(IDirectDrawSurfaceImpl* This, LPDDSCAPS lpDdsCaps
             IDirectDrawSurface_AddRef(This);
             *lpDDsurface = This;
         }
+
+        return DD_OK;
     }
 
-    return DD_OK;
+    return DDERR_NOTFOUND;
 }
 
 HRESULT dds_GetCaps(IDirectDrawSurfaceImpl* This, LPDDSCAPS lpDDSCaps)
 {
+    if (!lpDDSCaps)
+        return DDERR_INVALIDPARAMS;
+
     lpDDSCaps->dwCaps = This->caps;
+
     return DD_OK;
 }
 
@@ -627,6 +834,11 @@ HRESULT dds_GetClipper(IDirectDrawSurfaceImpl* This, IDirectDrawClipperImpl** lp
 
 HRESULT dds_GetColorKey(IDirectDrawSurfaceImpl* This, DWORD dwFlags, LPDDCOLORKEY lpColorKey)
 {
+    if (dwFlags != DDCKEY_SRCBLT)
+    {
+        TRACE_EXT("     NOT_IMPLEMENTED dwFlags=%08X\n", dwFlags);
+    }
+
     if (lpColorKey)
     {
         lpColorKey->dwColorSpaceHighValue = This->color_key.dwColorSpaceHighValue;
@@ -646,14 +858,9 @@ HRESULT dds_GetDC(IDirectDrawSurfaceImpl* This, HDC FAR* lpHDC)
         return DDERR_INVALIDPARAMS;
     }
 
-    if ((This->l_pitch % 4))
-    {
-        TRACE("NOT_IMPLEMENTED     GetDC: width=%d height=%d\n", This->width, This->height);
-    }
-
     RGBQUAD* data =
         This->palette ? This->palette->data_rgb :
-        g_ddraw->primary && g_ddraw->primary->palette ? g_ddraw->primary->palette->data_rgb :
+        g_ddraw && g_ddraw->primary && g_ddraw->primary->palette ? g_ddraw->primary->palette->data_rgb :
         NULL;
 
     HDC dc = This->hdc;
@@ -728,6 +935,9 @@ HRESULT dds_Lock(
     DWORD dwFlags,
     HANDLE hEvent)
 {
+    if (g_ddraw && g_ddraw->lock_surfaces)
+        EnterCriticalSection(&This->cs);
+
     dbg_dump_dds_lock_flags(dwFlags);
 
     if (g_ddraw && g_ddraw->fixnotresponding)
@@ -751,7 +961,7 @@ HRESULT dds_Lock(
         }
 
         lpDDSurfaceDesc->lpSurface =
-            (char*)dds_GetBuffer(This) + (lpDestRect->left * This->lx_pitch) + (lpDestRect->top * This->l_pitch);
+            (char*)dds_GetBuffer(This) + (lpDestRect->left * This->bytes_pp) + (lpDestRect->top * This->pitch);
     }
 
     return ret;
@@ -759,7 +969,7 @@ HRESULT dds_Lock(
 
 HRESULT dds_ReleaseDC(IDirectDrawSurfaceImpl* This, HDC hDC)
 {
-    if ((This->caps & DDSCAPS_PRIMARYSURFACE) && g_ddraw->render.run)
+    if ((This->caps & DDSCAPS_PRIMARYSURFACE) && g_ddraw && g_ddraw->render.run)
     {
         InterlockedExchange(&g_ddraw->render.surface_updated, TRUE);
 
@@ -778,7 +988,19 @@ HRESULT dds_ReleaseDC(IDirectDrawSurfaceImpl* This, HDC hDC)
 HRESULT dds_SetClipper(IDirectDrawSurfaceImpl* This, IDirectDrawClipperImpl* lpClipper)
 {
     if (lpClipper)
+    {
         IDirectDrawClipper_AddRef(lpClipper);
+
+        if ((This->caps & DDSCAPS_PRIMARYSURFACE) && lpClipper->hwnd)
+        {
+            if (lpClipper->region)
+                DeleteObject(lpClipper->region);
+
+            RECT rc = { 0, 0, This->width, This->height };
+
+            lpClipper->region = CreateRectRgnIndirect(&rc);
+        }
+    }
 
     if (This->clipper)
         IDirectDrawClipper_Release(This->clipper);
@@ -790,11 +1012,13 @@ HRESULT dds_SetClipper(IDirectDrawSurfaceImpl* This, IDirectDrawClipperImpl* lpC
 
 HRESULT dds_SetColorKey(IDirectDrawSurfaceImpl* This, DWORD dwFlags, LPDDCOLORKEY lpColorKey)
 {
+    if (dwFlags != DDCKEY_SRCBLT || !lpColorKey)
+    {
+        TRACE_EXT("     NOT_IMPLEMENTED dwFlags=%08X, lpColorKey=%p\n", dwFlags, lpColorKey);
+    }
+
     if (lpColorKey)
     {
-        TRACE_EXT("     dwColorSpaceHighValue=%d\n", lpColorKey->dwColorSpaceHighValue);
-        TRACE_EXT("     dwColorSpaceLowValue=%d\n", lpColorKey->dwColorSpaceLowValue);
-
         This->color_key.dwColorSpaceHighValue = lpColorKey->dwColorSpaceHighValue;
         This->color_key.dwColorSpaceLowValue = lpColorKey->dwColorSpaceLowValue;
     }
@@ -810,7 +1034,7 @@ HRESULT dds_SetPalette(IDirectDrawSurfaceImpl* This, IDirectDrawPaletteImpl* lpD
     if (This->palette)
         IDirectDrawPalette_Release(This->palette);
 
-    if (This->caps & DDSCAPS_PRIMARYSURFACE)
+    if ((This->caps & DDSCAPS_PRIMARYSURFACE) && g_ddraw)
     {
         EnterCriticalSection(&g_ddraw->cs);
         This->palette = lpDDPalette;
@@ -833,7 +1057,7 @@ HRESULT dds_SetPalette(IDirectDrawSurfaceImpl* This, IDirectDrawPaletteImpl* lpD
 HRESULT dds_Unlock(IDirectDrawSurfaceImpl* This, LPRECT lpRect)
 {
     /* Hack for Warcraft II BNE and Diablo */
-    HWND hwnd = g_ddraw->bnet_active ? FindWindowEx(HWND_DESKTOP, NULL, "SDlgDialog", NULL) : NULL;
+    HWND hwnd = g_ddraw && g_ddraw->bnet_active ? FindWindowEx(HWND_DESKTOP, NULL, "SDlgDialog", NULL) : NULL;
 
     if (hwnd && (This->caps & DDSCAPS_PRIMARYSURFACE))
     {
@@ -888,7 +1112,7 @@ HRESULT dds_Unlock(IDirectDrawSurfaceImpl* This, LPRECT lpRect)
     }
 
     /* Hack for Star Trek Armada */
-    hwnd = g_ddraw->armadahack ? FindWindowEx(HWND_DESKTOP, NULL, "#32770", NULL) : NULL;
+    hwnd = g_ddraw && g_ddraw->armadahack ? FindWindowEx(HWND_DESKTOP, NULL, "#32770", NULL) : NULL;
 
     if (hwnd && (This->caps & DDSCAPS_PRIMARYSURFACE))
     {
@@ -926,7 +1150,7 @@ HRESULT dds_Unlock(IDirectDrawSurfaceImpl* This, LPRECT lpRect)
     }
 
 
-    if ((This->caps & DDSCAPS_PRIMARYSURFACE) && g_ddraw->render.run)
+    if ((This->caps & DDSCAPS_PRIMARYSURFACE) && g_ddraw && g_ddraw->render.run)
     {
         InterlockedExchange(&g_ddraw->render.surface_updated, TRUE);
 
@@ -942,6 +1166,9 @@ HRESULT dds_Unlock(IDirectDrawSurfaceImpl* This, LPRECT lpRect)
         }
     }
 
+    if (g_ddraw && g_ddraw->lock_surfaces)
+        LeaveCriticalSection(&This->cs);
+
     return DD_OK;
 }
 
@@ -952,6 +1179,79 @@ HRESULT dds_GetDDInterface(IDirectDrawSurfaceImpl* This, LPVOID* lplpDD)
 
     *lplpDD = This->ddraw;
     IDirectDraw_AddRef(This->ddraw);
+
+    return DD_OK;
+}
+
+HRESULT dds_SetSurfaceDesc(IDirectDrawSurfaceImpl* This, LPDDSURFACEDESC2 lpDDSD, DWORD dwFlags)
+{
+    dbg_dump_dds_flags(lpDDSD->dwFlags);
+    dbg_dump_dds_caps(lpDDSD->ddsCaps.dwCaps);
+
+    DWORD req_flags = DDSD_LPSURFACE | DDSD_PITCH | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT;
+
+    if ((lpDDSD->dwFlags & req_flags) != req_flags)
+        return DDERR_UNSUPPORTED;
+
+
+    if (This->bitmap)
+    {
+        DeleteObject(This->bitmap);
+        This->bitmap = NULL;
+    }
+    else if (This->surface && !This->custom_buf)
+    {
+        HeapFree(GetProcessHeap(), 0, This->surface);
+        This->surface = NULL;
+    }
+
+    if (This->hdc)
+    {
+        DeleteDC(This->hdc);
+        This->hdc = NULL;
+    }
+
+    if (This->bmi)
+    {
+        HeapFree(GetProcessHeap(), 0, This->bmi);
+        This->bmi = NULL;
+    }
+
+    if (This->mapping)
+    {
+        CloseHandle(This->mapping);
+        This->mapping = NULL;
+    }
+
+
+    switch (lpDDSD->ddpfPixelFormat.dwRGBBitCount)
+    {
+    case 8:
+        This->bpp = 8;
+        break;
+    case 15:
+        TRACE("     NOT_IMPLEMENTED bpp=%u\n", lpDDSD->ddpfPixelFormat.dwRGBBitCount);
+    case 16:
+        This->bpp = 16;
+        break;
+    case 24:
+        TRACE("     NOT_IMPLEMENTED bpp=%u\n", lpDDSD->ddpfPixelFormat.dwRGBBitCount);
+    case 32:
+        This->bpp = 32;
+        break;
+    default:
+        This->bpp = 8;
+        TRACE("     NOT_IMPLEMENTED bpp=%u\n", lpDDSD->ddpfPixelFormat.dwRGBBitCount);
+        break;
+    }
+
+    This->width = lpDDSD->dwWidth;
+    This->height = lpDDSD->dwHeight;
+    This->surface = lpDDSD->lpSurface;
+    This->pitch = lpDDSD->lPitch;
+    This->bytes_pp = This->bpp / 8;
+    This->size = This->pitch * This->height;
+    This->custom_buf = TRUE;
 
     return DD_OK;
 }
@@ -976,6 +1276,9 @@ HRESULT dd_CreateSurface(
     dbg_dump_dds_flags(lpDDSurfaceDesc->dwFlags);
     dbg_dump_dds_caps(lpDDSurfaceDesc->ddsCaps.dwCaps);
 
+    if (lpDDSurfaceDesc->ddsCaps.dwCaps & DDSCAPS_OVERLAY)
+        return DDERR_UNSUPPORTED;
+
     if ((lpDDSurfaceDesc->ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE) &&
         g_ddraw->primary &&
         g_ddraw->primary->width == g_ddraw->width &&
@@ -994,6 +1297,8 @@ HRESULT dd_CreateSurface(
     dst_surface->lpVtbl = &g_dds_vtbl;
 
     lpDDSurfaceDesc->dwFlags |= DDSD_CAPS;
+
+    InitializeCriticalSection(&dst_surface->cs);
 
     dst_surface->bpp = g_ddraw->bpp == 0 ? 16 : g_ddraw->bpp;
     dst_surface->flags = lpDDSurfaceDesc->dwFlags;
@@ -1034,20 +1339,29 @@ HRESULT dd_CreateSurface(
         dst_surface->height = lpDDSurfaceDesc->dwHeight;
     }
 
-    if (dst_surface->width && dst_surface->height)
+    if ((dst_surface->flags & DDSD_LPSURFACE) && (dst_surface->flags & DDSD_PITCH))
     {
-        dst_surface->lx_pitch = dst_surface->bpp / 8;
-        dst_surface->l_pitch = ((dst_surface->width * dst_surface->bpp + 31) & ~31) >> 3;
-        dst_surface->size = dst_surface->l_pitch * dst_surface->height * dst_surface->lx_pitch;
+        dst_surface->surface = lpDDSurfaceDesc->lpSurface;
+        dst_surface->pitch = lpDDSurfaceDesc->lPitch;
+        dst_surface->bytes_pp = dst_surface->bpp / 8;
+        dst_surface->size = dst_surface->pitch * dst_surface->height;
+        dst_surface->custom_buf = TRUE;
+    }
+    else if (dst_surface->width && dst_surface->height)
+    {
+        dst_surface->bytes_pp = dst_surface->bpp / 8;
+        dst_surface->pitch = ((dst_surface->width * dst_surface->bpp + 31) & ~31) >> 3;
+        dst_surface->size = dst_surface->pitch * dst_surface->height;
 
-        DWORD aligned_width = dst_surface->l_pitch / dst_surface->lx_pitch;
+        DWORD aligned_width = dst_surface->pitch / dst_surface->bytes_pp;
 
-        dst_surface->bmi =
-            HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(BITMAPINFOHEADER) + sizeof(RGBQUAD) * 256);
+        DWORD bmi_size = sizeof(BITMAPINFOHEADER) + sizeof(RGBQUAD) * 256;
+        DWORD bmp_size = dst_surface->pitch * (dst_surface->height + g_ddraw->guard_lines);
 
+        dst_surface->bmi = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, bmi_size);
         dst_surface->bmi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
         dst_surface->bmi->bmiHeader.biWidth = aligned_width;
-        dst_surface->bmi->bmiHeader.biHeight = -((int)dst_surface->height + 200);
+        dst_surface->bmi->bmiHeader.biHeight = -((int)dst_surface->height + g_ddraw->guard_lines);
         dst_surface->bmi->bmiHeader.biPlanes = 1;
         dst_surface->bmi->bmiHeader.biBitCount = dst_surface->bpp;
         dst_surface->bmi->bmiHeader.biCompression = dst_surface->bpp == 8 ? BI_RGB : BI_BITFIELDS;
@@ -1072,6 +1386,12 @@ HRESULT dd_CreateSurface(
                 dst_surface->bmi->bmiColors[i].rgbReserved = 0;
             }
         }
+        else if (dst_surface->bpp == 16 && g_ddraw->rgb555)
+        {
+            ((DWORD*)dst_surface->bmi->bmiColors)[0] = 0x7C00;
+            ((DWORD*)dst_surface->bmi->bmiColors)[1] = 0x03E0;
+            ((DWORD*)dst_surface->bmi->bmiColors)[2] = 0x001F;
+        }
         else if (dst_surface->bpp == 16)
         {
             ((DWORD*)dst_surface->bmi->bmiColors)[0] = 0xF800;
@@ -1086,18 +1406,49 @@ HRESULT dd_CreateSurface(
         }
 
         dst_surface->hdc = CreateCompatibleDC(g_ddraw->render.hdc);
+
+        dst_surface->mapping =
+            CreateFileMappingA(
+                INVALID_HANDLE_VALUE,
+                NULL,
+                PAGE_READWRITE | SEC_COMMIT,
+                0,
+                bmp_size + 256,
+                NULL);
+
+        DWORD map_offset = 0;
+
+        if (dst_surface->mapping)
+        {
+            LPVOID data = MapViewOfFile(dst_surface->mapping, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+            if (data)
+            {
+                while (((DWORD)data + map_offset) % 128) map_offset++;
+                UnmapViewOfFile(data);
+            }
+
+            if (!data || (map_offset % sizeof(DWORD)))
+            {
+                map_offset = 0;
+                CloseHandle(dst_surface->mapping);
+                dst_surface->mapping = NULL;
+            }
+        }
+
         dst_surface->bitmap =
-            CreateDIBSection(dst_surface->hdc, dst_surface->bmi, DIB_RGB_COLORS, (void**)&dst_surface->surface, NULL, 0);
+            CreateDIBSection(
+                dst_surface->hdc,
+                dst_surface->bmi,
+                DIB_RGB_COLORS,
+                (void**)&dst_surface->surface,
+                dst_surface->mapping,
+                map_offset);
 
         dst_surface->bmi->bmiHeader.biHeight = -((int)dst_surface->height);
 
         if (!dst_surface->bitmap)
         {
-            dst_surface->surface =
-                HeapAlloc(
-                    GetProcessHeap(),
-                    HEAP_ZERO_MEMORY,
-                    dst_surface->l_pitch * (dst_surface->height + 200) * dst_surface->lx_pitch);
+            dst_surface->surface = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, bmp_size);
         }
 
         if (dst_surface->caps & DDSCAPS_PRIMARYSURFACE)
@@ -1111,6 +1462,8 @@ HRESULT dd_CreateSurface(
 
     if (dst_surface->flags & DDSD_BACKBUFFERCOUNT)
     {
+        dst_surface->backbuffer_count = lpDDSurfaceDesc->dwBackBufferCount;
+
         TRACE("     dwBackBufferCount=%d\n", lpDDSurfaceDesc->dwBackBufferCount);
 
         DDSURFACEDESC desc;

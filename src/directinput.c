@@ -5,6 +5,7 @@
 #include "debug.h"
 #include "hook.h"
 #include "dd.h"
+#include "mouse.h"
 
 
 DIRECTINPUTCREATEAPROC real_DirectInputCreateA;
@@ -41,7 +42,7 @@ static HRESULT WINAPI fake_did_SetCooperativeLevel(IDirectInputDeviceA* This, HW
 
     if (This == g_mouse_device && g_ddraw && (dwFlags & DISCL_EXCLUSIVE))
     {
-        if (g_ddraw->locked || g_ddraw->devmode)
+        if (g_mouse_locked || g_ddraw->devmode)
         {
             while (real_ShowCursor(FALSE) >= 0);
         }
@@ -63,7 +64,7 @@ static HRESULT WINAPI fake_did_GetDeviceData(
 
     HRESULT result = real_did_GetDeviceData(This, cbObjectData, rgdod, pdwInOut, dwFlags);
 
-    if (SUCCEEDED(result) && g_ddraw && !g_ddraw->locked)
+    if (SUCCEEDED(result) && g_ddraw && !g_mouse_locked)
     {
         if (pdwInOut)
         {
@@ -85,7 +86,7 @@ static HRESULT WINAPI fake_did_GetDeviceState(IDirectInputDeviceA* This, DWORD c
 
     HRESULT result = real_did_GetDeviceState(This, cbData, lpvData);
 
-    if (SUCCEEDED(result) && g_ddraw && !g_ddraw->locked)
+    if (SUCCEEDED(result) && g_ddraw && !g_mouse_locked)
     {
         if (cbData > 0 && lpvData)
         {

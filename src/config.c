@@ -42,12 +42,21 @@ void cfg_load()
     g_ddraw->novidmem = cfg_get_bool("novidmem", FALSE);
     g_ddraw->fixnotresponding = cfg_get_bool("fixnotresponding", FALSE);
     g_ddraw->locktopleft = cfg_get_bool("locktopleft", FALSE);
+    g_ddraw->lock_surfaces = cfg_get_bool("lock_surfaces", FALSE);
     g_ddraw->releasealt = cfg_get_bool("releasealt", FALSE);
     g_ddraw->d3d9linear = cfg_get_bool("d3d9linear", TRUE);
     g_ddraw->gdilinear = cfg_get_bool("gdilinear", FALSE);
+    g_ddraw->d3d9on12 = cfg_get_bool("d3d9on12", FALSE);
     g_ddraw->resolutions = cfg_get_int("resolutions", RESLIST_NORMAL);
     g_ddraw->fpupreserve = cfg_get_bool("fpupreserve", FALSE);
     g_ddraw->allow_wmactivate = cfg_get_bool("allow_wmactivate", FALSE);
+    g_ddraw->d3d9_adapter = cfg_get_int("d3d9_adapter", 0);
+    g_ddraw->guard_lines = cfg_get_int("guard_lines", 200);
+    g_ddraw->max_resolutions = cfg_get_int("max_resolutions", 0);
+    g_ddraw->limit_bltfast = cfg_get_bool("limit_bltfast", FALSE);
+    g_ddraw->opengl_core = cfg_get_bool("opengl_core", FALSE);
+    g_ddraw->rgb555 = cfg_get_bool("rgb555", FALSE);
+    g_ddraw->hook_peekmessage = cfg_get_bool("hook_peekmessage", FALSE);
     cfg_get_string("screenshotdir", ".\\Screenshots\\", g_ddraw->screenshot_dir, sizeof(g_ddraw->screenshot_dir));
 
     if (g_ddraw->locktopleft)
@@ -55,8 +64,9 @@ void cfg_load()
 
     g_ddraw->armadahack = cfg_get_bool("armadahack", FALSE);
     g_ddraw->tshack = cfg_get_bool("tshack", FALSE);
+    g_ddraw->infantryhack = cfg_get_bool("infantryhack", FALSE);
 
-    if ((g_ddraw->infantryhack = cfg_get_bool("infantryhack", FALSE)))
+    if (cfg_get_bool("game_handles_close", FALSE) || g_ddraw->infantryhack)
     {
         GameHandlesClose = TRUE;
     }
@@ -144,18 +154,18 @@ void cfg_load()
     }
 
     /* to do: read .glslp config file instead of the shader and apply the correct settings  */
-    cfg_get_string("shader", "", g_ddraw->shader, sizeof(g_ddraw->shader));
+    cfg_get_string("shader", "Shaders\\cubic\\catmull-rom-bilinear.glsl", g_ddraw->shader, sizeof(g_ddraw->shader));
 
     cfg_get_string("renderer", "auto", tmp, sizeof(tmp));
     TRACE("     Using %s renderer\n", tmp);
 
-    if (tolower(tmp[0]) == 's' || tolower(tmp[0]) == 'g') /* gdi */
-    {
-        g_ddraw->renderer = gdi_render_main;
-    }
-    else if (tolower(tmp[0]) == 'd') /* direct3d9 */
+    if (tolower(tmp[0]) == 'd' || g_ddraw->d3d9on12) /* direct3d9 */
     {
         g_ddraw->renderer = d3d9_render_main;
+    }
+    else if (tolower(tmp[0]) == 's' || tolower(tmp[0]) == 'g') /* gdi */
+    {
+        g_ddraw->renderer = gdi_render_main;
     }
     else if (tolower(tmp[0]) == 'o') /* opengl */
     {
@@ -231,7 +241,7 @@ static void cfg_create_ini()
     if (fh)
     {
         fputs(
-            "; cnc-ddraw - https://github.com/CnCNet/cnc-ddraw - https://cncnet.org\n"
+            "; cnc-ddraw - https://github.com/FunkyFr3sh/cnc-ddraw\n"
             "\n"
             "[ddraw]\n"
             "; ### Optional settings ###\n"
@@ -269,7 +279,7 @@ static void cfg_create_ini()
             "\n"
             "; Preliminary libretro shader support - (Requires 'renderer=opengl') https://github.com/libretro/glsl-shaders\n"
             "; 2x scaling example: https://imgur.com/a/kxsM1oY - 4x scaling example: https://imgur.com/a/wjrhpFV\n"
-            "shader=Shaders\\interpolation\\bilinear.glsl\n"
+            "shader=Shaders\\cubic\\catmull-rom-bilinear.glsl\n"
             "\n"
             "; Window position, -32000 = center to screen\n"
             "posX=-32000\n"
@@ -346,19 +356,30 @@ static void cfg_create_ini()
             "fpupreserve=false\n"
             "\n"
             "\n"
-            "; Undocumented compatibility settings\n"
+            "; Undocumented settings\n"
+            "d3d9_adapter=0\n"
+            "opengl_core=false\n"
+            "d3d9on12=false\n"
+            "guard_lines=200\n"
+            "max_resolutions=0\n"
+            "limit_bltfast=false\n"
+            "game_handles_close=false\n"
             "accuratetimers=false\n"
             "fixpitch=true\n"
             "fixwndprochook=false\n"
             "novidmem=false\n"
             "fixnotresponding=false\n"
             "locktopleft=false\n"
+            "lock_surfaces=false\n"
             "releasealt=false\n"
             "gdilinear=false\n"
             "allow_wmactivate=false\n"
             "dinputhook=false\n"
             "flipclear=false\n"
+            "fixmousehook=false\n"
             "bpp=0\n"
+            "rgb555=false\n"
+            "hook_peekmessage=false\n"
             "\n"
             "\n"
             "\n"
@@ -425,8 +446,9 @@ static void cfg_create_ini()
             "nonexclusive=true\n"
             "adjmouse=true\n"
             "\n"
-            "; American Conquest\n"
+            "; American Conquest / Cossacks\n"
             "[DMCR]\n"
+            "resolutions=2\n"
             "minfps=-2\n"
             "\n"
             "; Age of Wonders\n"
@@ -469,6 +491,11 @@ static void cfg_create_ini()
             "[AT]\n"
             "fixchilds=0\n"
             "\n"
+            "; Baldur's Gate II\n"
+            "; Note: 'Use 3D Acceleration' must be disabled and 'Full Screen' must be enabled in BGConfig.exe\n"
+            "[BGMain]\n"
+            "resolutions=2\n"
+            "\n"
             "; Blade & Sword\n"
             "[comeon]\n"
             "maxgameticks=62\n"
@@ -478,10 +505,6 @@ static void cfg_create_ini()
             "[Client]\n"
             "checkfile=.\\SOUND.REZ\n"
             "noactivateapp=true\n"
-            "\n"
-            "; Casino Empire\n"
-            "[CasinoEmpire]\n"
-            "hook=2\n"
             "\n"
             "; Carmageddon\n"
             "[CARMA95]\n"
@@ -506,12 +529,6 @@ static void cfg_create_ini()
             "\n"
             "; Command & Conquer: Sole Survivor\n"
             "[SOLE]\n"
-            "maxgameticks=120\n"
-            "maxfps=60\n"
-            "minfps=-1\n"
-            "\n"
-            "; Command & Conquer: Sole Survivor\n"
-            "[SoleSurvivor]\n"
             "maxgameticks=120\n"
             "maxfps=60\n"
             "minfps=-1\n"
@@ -634,6 +651,7 @@ static void cfg_create_ini()
             "\n"
             "; Caesar III\n"
             "[c3]\n"
+            "renderer=opengl\n"
             "nonexclusive=true\n"
             "adjmouse=true\n"
             "\n"
@@ -701,6 +719,7 @@ static void cfg_create_ini()
             "[AdSanguo]\n"
             "maxgameticks=60\n"
             "noactivateapp=true\n"
+            "limit_bltfast=true\n"
             "\n"
             "; Dark Reign: The Future of War\n"
             "[DKReign]\n"
@@ -719,15 +738,37 @@ static void cfg_create_ini()
             "maintas=false\n"
             "boxing=false\n"
             "\n"
+            "; Escape Velocity Nova\n"
+            "[EV Nova]\n"
+            "renderer=opengl\n"
+            "devmode=true\n"
+            "hook_peekmessage=true\n"
+            "rgb555=true\n"
+            "keytogglefullscreen=0x46\n"
+            "adjmouse=true\n"
+            "\n"
             "; Economic War\n"
             "[EcoW]\n"
             "maxgameticks=60\n"
             "fixnotresponding=true\n"
             "\n"
+            "; Fallout\n"
+            "[falloutw]\n"
+            "dinputhook=true\n"
+            "\n"
+            "; Fallout 2\n"
+            "[FALLOUT2]\n"
+            "dinputhook=true\n"
+            "\n"
+            "; Fairy Tale About Father Frost, Ivan and Nastya\n"
+            "[mrazik]\n"
+            "guard_lines=0\n"
+            "\n"
             "; Future Cop - L.A.P.D.\n"
             "[FCopLAPD]\n"
+            "renderer=opengl\n"
+            "nonexclusive=true\n"
             "adjmouse=true\n"
-            "fixchilds=3\n"
             "\n"
             "; G-Police\n"
             "[GPOLICE]\n"
@@ -780,6 +821,7 @@ static void cfg_create_ini()
             "devmode=true\n"
             "resolutions=2\n"
             "infantryhack=true\n"
+            "max_resolutions=90\n"
             "\n"
             "; Jagged Alliance 2\n"
             "[ja2]\n"
@@ -858,12 +900,16 @@ static void cfg_create_ini()
             "\n"
             "; Moorhuhn\n"
             "[Moorhuhn]\n"
-            "renderer=opengl\n"
             "dinputhook=true\n"
             "\n"
             "; Moorhuhn 2\n"
             "[Moorhuhn2]\n"
             "dinputhook=true\n"
+            "releasealt=true\n"
+            "\n"
+            "; New Robinson\n"
+            "[ROBY]\n"
+            "adjmouse=true\n"
             "\n"
             "; Outlaws\n"
             "[olwin]\n"
@@ -875,10 +921,6 @@ static void cfg_create_ini()
             "; Pharaoh\n"
             "[Pharaoh]\n"
             "adjmouse=true\n"
-            "\n"
-            "; Pacific General\n"
-            "[PACGEN]\n"
-            "renderer=opengl\n"
             "\n"
             "; Pax Imperia\n"
             "[Pax Imperia]\n"
@@ -892,10 +934,16 @@ static void cfg_create_ini()
             "; ROAD RASH\n"
             "[RoadRash]\n"
             "adjmouse=true\n"
+            "fixchilds=1\n"
             "\n"
             "; Septerra Core\n"
             "[septerra]\n"
             "hook=2\n"
+            "\n"
+            "; Sim Copter\n"
+            "[SimCopter]\n"
+            "renderer=opengl\n"
+            "nonexclusive=true\n"
             "\n"
             "; Settlers 3\n"
             "[s3]\n"
@@ -923,6 +971,10 @@ static void cfg_create_ini()
             "nonexclusive=true\n"
             "adjmouse=true\n"
             "\n"
+            "; Starcraft\n"
+            "[StarCraft]\n"
+            "game_handles_close=true\n"
+            "\n"
             "; Stronghold Crusader HD\n"
             "[Stronghold Crusader]\n"
             "adjmouse=true\n"
@@ -938,10 +990,6 @@ static void cfg_create_ini()
             "; Stronghold HD\n"
             "[Stronghold]\n"
             "adjmouse=true\n"
-            "\n"
-            "; Steel Panthers: World At War\n"
-            "[MECH]\n"
-            "renderer=opengl\n"
             "\n"
             "; Sim City 3000\n"
             "[SC3]\n"
@@ -960,15 +1008,27 @@ static void cfg_create_ini()
             "maintas=false\n"
             "boxing=false\n"
             "\n"
+            "; Theme Park World\n"
+            "[TP]\n"
+            "fixwndprochook=true\n"
+            "\n"
             "; Total Annihilation (Unofficial Beta Patch v3.9.02)\n"
             "[TotalA]\n"
-            "renderer=opengl\n"
+            "lock_surfaces=true\n"
+            "singlecpu=false\n"
+            "fixwndprochook=true\n"
+            "\n"
+            "; Total Annihilation Replay Viewer (Unofficial Beta Patch v3.9.02)\n"
+            "[Viewer]\n"
+            "lock_surfaces=true\n"
+            "singlecpu=false\n"
             "fixwndprochook=true\n"
             "\n"
             "; Three Kingdoms: Fate of the Dragon\n"
             "[sanguo]\n"
             "maxgameticks=60\n"
             "noactivateapp=true\n"
+            "limit_bltfast=true\n"
             "\n"
             "; Twisted Metal\n"
             "[TWISTED]\n"
@@ -994,17 +1054,12 @@ static void cfg_create_ini()
             "\n"
             "; Uprising\n"
             "[uprising]\n"
-            "renderer=opengl\n"
             "adjmouse=true\n"
             "\n"
             "; Uprising 2\n"
             "[Uprising 2]\n"
             "renderer=opengl\n"
             "adjmouse=true\n"
-            "\n"
-            "; Warlords 3\n"
-            "[Darklord]\n"
-            "renderer=gdi\n"
             "\n"
             "; Wizardry 8\n"
             "[Wiz8]\n"
@@ -1060,17 +1115,29 @@ static void cfg_init()
     }
 
     /* set up settings ini */
-    strncpy(g_config.ini_path, ".\\ddraw.ini", sizeof(g_config.ini_path) - 1);
 
-    if (GetFileAttributes(g_config.ini_path) == INVALID_FILE_ATTRIBUTES)
-        cfg_create_ini();
+    if (strlen(g_config.game_path) > 0)
+    {
+        _snprintf(g_config.ini_path, sizeof(g_config.ini_path) - 1, "%sddraw.ini", g_config.game_path);
+
+        if (GetFileAttributes(g_config.ini_path) == INVALID_FILE_ATTRIBUTES)
+        {
+            cfg_create_ini();
+        }
+
+        if (GetFileAttributes(g_config.ini_path) == INVALID_FILE_ATTRIBUTES)
+        {
+            strncpy(g_config.ini_path, ".\\ddraw.ini", sizeof(g_config.ini_path) - 1);
+        }
+    }
+    else
+    {
+        strncpy(g_config.ini_path, ".\\ddraw.ini", sizeof(g_config.ini_path) - 1);
+    }
 
     if (GetFileAttributes(g_config.ini_path) == INVALID_FILE_ATTRIBUTES)
     {
-        _snprintf(g_config.ini_path, sizeof(g_config.ini_path) - 1, "%sddraw.ini", g_config.game_path);
-        
-        if (GetFileAttributes(g_config.ini_path) == INVALID_FILE_ATTRIBUTES)
-            cfg_create_ini();
+        cfg_create_ini();
     }
 }
 

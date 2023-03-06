@@ -76,9 +76,9 @@ HRESULT __stdcall IDirectDrawPalette__Initialize(
     DWORD dwFlags,
     LPPALETTEENTRY lpDDColorTable)
 {
-    TRACE("NOT_IMPLEMENTED -> %s(This=%p)\n", __FUNCTION__, This);
+    TRACE("-> %s(This=%p)\n", __FUNCTION__, This);
     HRESULT ret = DD_OK;
-    TRACE("NOT_IMPLEMENTED <- %s\n", __FUNCTION__);
+    TRACE("<- %s\n", __FUNCTION__);
     return ret;
 }
 

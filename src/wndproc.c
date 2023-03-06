@@ -19,7 +19,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
 #ifdef _DEBUG_X
     if (uMsg != WM_MOUSEMOVE && uMsg != WM_NCMOUSEMOVE && uMsg != WM_NCHITTEST && uMsg != WM_SETCURSOR &&
         uMsg != WM_KEYUP && uMsg != WM_KEYDOWN && uMsg != WM_CHAR && uMsg != WM_DEADCHAR && uMsg != WM_INPUT &&
-        uMsg != WM_UNICHAR && uMsg != WM_IME_CHAR && uMsg != WM_IME_KEYDOWN && uMsg != WM_IME_KEYUP)
+        uMsg != WM_UNICHAR && uMsg != WM_IME_CHAR && uMsg != WM_IME_KEYDOWN && uMsg != WM_IME_KEYUP && uMsg != WM_TIMER)
     {
         TRACE_EXT(
             "     uMsg = %s (%d), wParam = %08X (%d), lParam = %08X (%d)\n",
@@ -105,7 +105,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                 case HTTOPRIGHT:
                     return DefWindowProc(hWnd, uMsg, wParam, lParam);
                 case HTCLIENT:
-                    if (!g_ddraw->locked && !g_ddraw->devmode)
+                    if (!g_mouse_locked && !g_ddraw->devmode)
                     {
                         real_SetCursor(LoadCursor(NULL, IDC_ARROW));
                         return TRUE;
@@ -135,7 +135,9 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     }
     case WM_D3D9DEVICELOST:
     {
-        if (g_ddraw->renderer == d3d9_render_main && d3d9_on_device_lost())
+        if ((!g_ddraw->windowed || !IsIconic(g_ddraw->hwnd)) &&
+            g_ddraw->renderer == d3d9_render_main &&
+            d3d9_on_device_lost())
         {
             if (!g_ddraw->windowed)
                 mouse_lock();
@@ -259,9 +261,9 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                     CopyRect(&clientrc, windowrc) &&
                     util_unadjust_window_rect(
                         &clientrc, 
-                        GetWindowLong(hWnd, GWL_STYLE), 
+                        real_GetWindowLongA(hWnd, GWL_STYLE),
                         GetMenu(hWnd) != NULL,
-                        GetWindowLong(hWnd, GWL_EXSTYLE)) &&
+                        real_GetWindowLongA(hWnd, GWL_EXSTYLE)) &&
                     SetRect(&clientrc, 0, 0, clientrc.right - clientrc.left, clientrc.bottom - clientrc.top))
                 {
                     float scaleH = (float)g_ddraw->height / g_ddraw->width;
@@ -296,9 +298,9 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                 if (CopyRect(&clientrc, windowrc) &&
                     util_unadjust_window_rect(
                         &clientrc, 
-                        GetWindowLong(hWnd, GWL_STYLE), 
+                        real_GetWindowLongA(hWnd, GWL_STYLE),
                         GetMenu(hWnd) != NULL,
-                        GetWindowLong(hWnd, GWL_EXSTYLE)) &&
+                        real_GetWindowLongA(hWnd, GWL_EXSTYLE)) &&
                     SetRect(&clientrc, 0, 0, clientrc.right - clientrc.left, clientrc.bottom - clientrc.top))
                 {
                     if (clientrc.right < g_ddraw->width)
@@ -352,9 +354,9 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                 if (CopyRect(&clientrc, windowrc) &&
                     util_unadjust_window_rect(
                         &clientrc, 
-                        GetWindowLong(hWnd, GWL_STYLE), 
+                        real_GetWindowLongA(hWnd, GWL_STYLE),
                         GetMenu(hWnd) != NULL,
-                        GetWindowLong(hWnd, GWL_EXSTYLE)))
+                        real_GetWindowLongA(hWnd, GWL_EXSTYLE)))
                 {
                     g_config.window_rect.left = clientrc.left;
                     g_config.window_rect.top = clientrc.top;
@@ -429,7 +431,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     {
         if (!g_ddraw->wine) /* hack: disable aero snap */
         {
-            LONG style = GetWindowLong(g_ddraw->hwnd, GWL_STYLE);
+            LONG style = real_GetWindowLongA(g_ddraw->hwnd, GWL_STYLE);
 
             if (!(style & WS_MAXIMIZEBOX))
             {
@@ -442,7 +444,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     {
         if ((wParam & ~0x0F) == SC_MOVE && !g_ddraw->wine) /* hack: disable aero snap */
         {
-            LONG style = GetWindowLong(g_ddraw->hwnd, GWL_STYLE);
+            LONG style = real_GetWindowLongA(g_ddraw->hwnd, GWL_STYLE);
 
             if ((style & WS_MAXIMIZEBOX))
             {
@@ -476,7 +478,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     case WM_WINDOWPOSCHANGING:
     {
         /* workaround for a bug where sometimes a background window steals the focus */
-        if (g_ddraw->locked)
+        if (g_mouse_locked)
         {
             WINDOWPOS* pos = (WINDOWPOS*)lParam;
 
@@ -484,7 +486,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
             {
                 mouse_unlock();
 
-                if (GetForegroundWindow() == g_ddraw->hwnd)
+                if (real_GetForegroundWindow() == g_ddraw->hwnd)
                     mouse_lock();
             }
         }
@@ -523,14 +525,14 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
                     mouse_lock();
                 }
             }
-            else if (g_ddraw->fullscreen)
+            else if (g_ddraw->fullscreen && real_GetForegroundWindow() == g_ddraw->hwnd)
             {
                 mouse_lock();
             }
         }
         else
         {
-            if (!g_ddraw->windowed && !g_ddraw->locked && g_ddraw->noactivateapp && !g_ddraw->devmode)
+            if (!g_ddraw->windowed && !g_mouse_locked && g_ddraw->noactivateapp && !g_ddraw->devmode)
                 return 0;
 
             mouse_unlock();
@@ -557,6 +559,14 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
             ip.ki.wVk = VK_MENU;
             ip.ki.dwFlags = KEYEVENTF_KEYUP;
             SendInput(1, &ip, sizeof(ip));
+
+            if (g_hook_dinput)
+            {
+                ip.type = INPUT_KEYBOARD;
+                ip.ki.wScan = 56; // LeftAlt
+                ip.ki.dwFlags = KEYEVENTF_KEYUP | KEYEVENTF_SCANCODE;
+                SendInput(1, &ip, sizeof(ip));
+            }
         }
 
         if (g_ddraw->windowed || g_ddraw->noactivateapp)
@@ -677,7 +687,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     case WM_RBUTTONUP:
     case WM_MBUTTONUP:
     {
-        if (!g_ddraw->devmode && !g_ddraw->locked)
+        if (!g_ddraw->devmode && !g_mouse_locked)
         {
             int x = GET_X_LPARAM(lParam);
             int y = GET_Y_LPARAM(lParam);
@@ -718,7 +728,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     case WM_MBUTTONDOWN:
     case WM_MOUSEMOVE:
     {
-        if (!g_ddraw->devmode && !g_ddraw->locked)
+        if (!g_ddraw->devmode && !g_mouse_locked)
         {
             return 0;
         }
@@ -765,7 +775,7 @@ LRESULT CALLBACK fake_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam
         case WM_RBUTTONDOWN:
         case WM_XBUTTONDOWN:
         {
-            if (!g_ddraw->devmode && !g_ddraw->locked)
+            if (!g_ddraw->devmode && !g_mouse_locked)
             {
                 int x = (DWORD)((GET_X_LPARAM(lParam) - g_ddraw->render.viewport.x) * g_ddraw->render.unscale_w);
                 int y = (DWORD)((GET_Y_LPARAM(lParam) - g_ddraw->render.viewport.y) * g_ddraw->render.unscale_h);

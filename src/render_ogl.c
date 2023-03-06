@@ -35,6 +35,13 @@ DWORD WINAPI ogl_render_main(void)
     {
         oglu_init();
 
+        TRACE("+--OpenGL-----------------------------------------\n");
+        TRACE("| GL_VERSION:                  %s\n", glGetString(GL_VERSION));
+        TRACE("| GL_VENDOR:                   %s\n", glGetString(GL_VENDOR));
+        TRACE("| GL_RENDERER:                 %s\n", glGetString(GL_RENDERER));
+        TRACE("| GL_SHADING_LANGUAGE_VERSION: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+        TRACE("+------------------------------------------------\n");
+
         g_ogl.context = ogl_create_core_context(g_ddraw->render.hdc);
 
         if (oglu_ext_exists("WGL_EXT_swap_control", g_ddraw->render.hdc) && wglSwapIntervalEXT)
@@ -85,6 +92,14 @@ static HGLRC ogl_create_core_context(HDC hdc)
     {
         xwglDeleteContext(g_ogl.context);
         oglu_init();
+
+        TRACE("+--OpenGL Core-----------------------------------\n");
+        TRACE("| GL_VERSION:                  %s\n", glGetString(GL_VERSION));
+        TRACE("| GL_VENDOR:                   %s\n", glGetString(GL_VENDOR));
+        TRACE("| GL_RENDERER:                 %s\n", glGetString(GL_RENDERER));
+        TRACE("| GL_SHADING_LANGUAGE_VERSION: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+        TRACE("+------------------------------------------------\n");
+
         return context;
     }
     else if (context)
@@ -150,6 +165,24 @@ static void ogl_build_programs()
                 _snprintf(shader_path, sizeof(shader_path) - 1, "%s%s", g_config.game_path, g_ddraw->shader);
             }
 
+            if (GetFileAttributes(shader_path) != INVALID_FILE_ATTRIBUTES)
+            {
+                /* detect common upscaling shaders and disable them if no upscaling is required */
+
+                BOOL is_upscaler =
+                    strstr(g_ddraw->shader, "catmull-rom-bilinear.glsl") != NULL ||
+                    strstr(g_ddraw->shader, "lanczos2-sharp.glsl") != NULL ||
+                    strstr(g_ddraw->shader, "xbr-lv2-noblend.glsl") != NULL ||
+                    strstr(g_ddraw->shader, "xbrz-freescale.glsl") != NULL;
+
+                if (is_upscaler && 
+                    g_ddraw->render.viewport.width == g_ddraw->width && 
+                    g_ddraw->render.viewport.height == g_ddraw->height)
+                {
+                    shader_path[0] = 0;
+                }
+            }
+
             g_ogl.scale_program = oglu_build_program_from_file(shader_path, wglCreateContextAttribsARB != NULL);
         }
         else
@@ -157,7 +190,7 @@ static void ogl_build_programs()
             g_oglu_got_version3 = FALSE;
         }
 
-        g_ogl.filter_bilinear = strstr(g_ddraw->shader, "bilinear.glsl") != 0;
+        g_ogl.filter_bilinear = strstr(g_ddraw->shader, "bilinear.glsl") != NULL;
     }
 
     if (g_oglu_got_version2 && !g_ogl.main_program)
@@ -210,6 +243,19 @@ static void ogl_create_textures(int width, int height)
                 0,
                 g_ogl.surface_format = GL_BGRA,
                 g_ogl.surface_type = GL_UNSIGNED_BYTE,
+                0);
+        }
+        else if (g_ddraw->bpp == 16 && g_ddraw->rgb555)
+        {
+            glTexImage2D(
+                GL_TEXTURE_2D,
+                0,
+                GL_RGB5_A1,
+                g_ogl.surface_tex_width,
+                g_ogl.surface_tex_height,
+                0,
+                g_ogl.surface_format = GL_BGRA,
+                g_ogl.surface_type = GL_UNSIGNED_SHORT_1_5_5_5_REV,
                 0);
         }
         else if (g_ddraw->bpp == 16)
@@ -556,7 +602,6 @@ static void ogl_init_scale_program()
 static void ogl_render()
 {
     BOOL needs_update = FALSE;
-    LONG clear_count = 0;
 
     glViewport(
         g_ddraw->render.viewport.x, g_ddraw->render.viewport.y,
@@ -587,9 +632,6 @@ static void ogl_render()
 
         BOOL scale_changed = FALSE;
 
-        if (InterlockedExchange(&g_ddraw->render.clear_screen, FALSE))
-            clear_count = 10;
-
         fpsl_frame_start();
 
         EnterCriticalSection(&g_ddraw->cs);
@@ -600,6 +642,9 @@ static void ogl_render()
             g_ddraw->primary->height == g_ddraw->height &&
             (g_ddraw->bpp == 16 || g_ddraw->bpp == 32 || g_ddraw->primary->palette))
         {
+            if (g_ddraw->lock_surfaces)
+                EnterCriticalSection(&g_ddraw->primary->cs);
+
             if (g_ddraw->vhack)
             {
                 if (util_detect_low_res_screen())
@@ -644,7 +689,7 @@ static void ogl_render()
 
                 glBindTexture(GL_TEXTURE_2D, g_ogl.surface_tex_ids[tex_index]);
 
-                DWORD row_len = g_ddraw->primary->l_pitch ? g_ddraw->primary->l_pitch / g_ddraw->primary->lx_pitch : 0;
+                DWORD row_len = g_ddraw->primary->pitch ? g_ddraw->primary->pitch / g_ddraw->primary->bytes_pp : 0;
 
                 if (row_len != g_ddraw->primary->width)
                     glPixelStorei(GL_UNPACK_ROW_LENGTH, row_len);
@@ -703,17 +748,15 @@ static void ogl_render()
                     }
                 }
             }
+
+            if (g_ddraw->lock_surfaces)
+                LeaveCriticalSection(&g_ddraw->primary->cs);
         }
 
         LeaveCriticalSection(&g_ddraw->cs);
 
-        if (g_ddraw->wine)
+        if (g_ddraw->render.viewport.x != 0 || g_ddraw->render.viewport.y != 0)
         {
-            glClear(GL_COLOR_BUFFER_BIT);
-        }
-        else if (clear_count > 0)
-        {
-            clear_count--;
             glClear(GL_COLOR_BUFFER_BIT);
         }
 

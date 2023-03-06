@@ -7,6 +7,8 @@
 #include "IDirectDrawSurface.h"
 #include "IDirectDraw.h"
 
+#define DDBLT_NO_CLIP (1 << 31)
+
 /* enables redraw via blt/unlock if there wasn't any flip for X ms */
 #define FLIP_REDRAW_TIMEOUT 1000 / 10
 
@@ -31,6 +33,7 @@ HRESULT dds_SetColorKey(IDirectDrawSurfaceImpl* This, DWORD dwFlags, LPDDCOLORKE
 HRESULT dds_SetPalette(IDirectDrawSurfaceImpl* This, IDirectDrawPaletteImpl* lpDDPalette);
 HRESULT dds_Unlock(IDirectDrawSurfaceImpl* This, LPRECT lpRect);
 HRESULT dds_GetDDInterface(IDirectDrawSurfaceImpl* This, LPVOID* lplpDD);
+HRESULT dds_SetSurfaceDesc(IDirectDrawSurfaceImpl* This, LPDDSURFACEDESC2 lpDDSD, DWORD dwFlags);
 void* dds_GetBuffer(IDirectDrawSurfaceImpl* This);
 HRESULT dd_CreateSurface(IDirectDrawImpl* This, LPDDSURFACEDESC lpDDSurfaceDesc, IDirectDrawSurfaceImpl** lpDDSurface, IUnknown FAR* unkOuter);
 

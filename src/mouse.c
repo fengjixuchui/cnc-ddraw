@@ -5,6 +5,7 @@
 #include "hook.h"
 
 
+BOOL g_mouse_locked;
 HHOOK g_mouse_hook;
 HOOKPROC g_mouse_proc;
 
@@ -13,7 +14,7 @@ void mouse_lock()
     if (g_ddraw->devmode || g_ddraw->bnet_active)
         return;
 
-    if (g_hook_active && !g_ddraw->locked && !IsIconic(g_ddraw->hwnd))
+    if (g_hook_active && !g_mouse_locked && !IsIconic(g_ddraw->hwnd))
     {
         int game_count = InterlockedExchangeAdd((LONG*)&g_ddraw->show_cursor_count, 0);
         int cur_count = real_ShowCursor(TRUE) - 1;
@@ -46,7 +47,7 @@ void mouse_lock()
         real_MapWindowPoints(g_ddraw->hwnd, HWND_DESKTOP, (LPPOINT)&rc, 2);
         real_ClipCursor(&rc);
 
-        g_ddraw->locked = TRUE;
+        g_mouse_locked = TRUE;
     }
 }
 
@@ -55,9 +56,9 @@ void mouse_unlock()
     if (g_ddraw->devmode || !g_hook_active)
         return;
 
-    if (g_ddraw->locked)
+    if (g_mouse_locked)
     {
-        g_ddraw->locked = FALSE;
+        g_mouse_locked = FALSE;
 
         real_ClipCursor(NULL);
 
@@ -82,7 +83,7 @@ LRESULT CALLBACK mouse_hook_proc(int Code, WPARAM wParam, LPARAM lParam)
     if (!g_ddraw)
         return g_mouse_proc(Code, wParam, lParam);
 
-    if (Code < 0 || (!g_ddraw->devmode && !g_ddraw->locked))
+    if (Code < 0 || (!g_ddraw->devmode && !g_mouse_locked))
         return CallNextHookEx(g_mouse_hook, Code, wParam, lParam);
 
     fake_GetCursorPos(&((MOUSEHOOKSTRUCT*)lParam)->pt);

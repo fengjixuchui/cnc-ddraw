@@ -214,6 +214,11 @@ void oglu_init()
         g_oglu_got_version3 = FALSE;
         wglCreateContextAttribsARB = (PFNWGLCREATECONTEXTATTRIBSARBPROC)xwglGetProcAddress("wglCreateContextAttribsARB");
     }
+    
+    if (g_ddraw->opengl_core)
+    {
+        wglCreateContextAttribsARB = (PFNWGLCREATECONTEXTATTRIBSARBPROC)xwglGetProcAddress("wglCreateContextAttribsARB");
+    }
 }
 
 BOOL oglu_ext_exists(char* ext, HDC hdc)

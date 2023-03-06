@@ -13,6 +13,7 @@ typedef struct D3D9RENDERER
 {
     HMODULE hmodule;
     D3DPRESENT_PARAMETERS params;
+    HWND hwnd;
     LPDIRECT3D9 instance;
     LPDIRECT3DDEVICE9 device;
     LPDIRECT3DVERTEXBUFFER9 vertex_buf;
@@ -27,10 +28,22 @@ typedef struct D3D9RENDERER
     int tex_height;
 } D3D9RENDERER;
 
+#define MAX_D3D9ON12_QUEUES        2
+
+typedef struct _D3D9ON12_ARGS
+{
+    BOOL Enable9On12;
+    IUnknown* pD3D12Device;
+    IUnknown* ppD3D12Queues[MAX_D3D9ON12_QUEUES];
+    UINT NumQueues;
+    UINT NodeMask;
+} D3D9ON12_ARGS;
+
 BOOL d3d9_is_available();
 DWORD WINAPI d3d9_render_main(void);
 BOOL d3d9_create();
-BOOL d3d9_reset();
+BOOL d3d9_reset(BOOL windowed);
+BOOL d3d9_release_resources();
 BOOL d3d9_release();
 BOOL d3d9_on_device_lost();
 

@@ -5,6 +5,7 @@
 #include <windows.h>
 
 
+BOOL util_is_avx_supported();
 void util_limit_game_ticks();
 void util_update_bnet_pos(int newX, int newY);
 BOOL util_get_lowest_resolution(float ratio, SIZE* outRes, DWORD minWidth, DWORD minHeight, DWORD maxWidth, DWORD maxHeight);

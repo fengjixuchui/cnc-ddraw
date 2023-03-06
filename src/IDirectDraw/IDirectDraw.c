@@ -339,7 +339,7 @@ HRESULT __stdcall IDirectDraw__GetFourCCCodes(IDirectDrawImpl* This, LPDWORD lpN
 HRESULT __stdcall IDirectDraw__GetGDISurface(IDirectDrawImpl* This, LPDIRECTDRAWSURFACE7* lplpGDIDDSurface)
 {
     TRACE("NOT_IMPLEMENTED -> %s(This=%p)\n", __FUNCTION__, This);
-    HRESULT ret = DDERR_NOTFOUND;
+    HRESULT ret = DD_OK;
     *lplpGDIDDSurface = (LPDIRECTDRAWSURFACE7)g_ddraw->primary;
     TRACE("NOT_IMPLEMENTED <- %s\n", __FUNCTION__);
     return ret;
@@ -371,9 +371,9 @@ HRESULT __stdcall IDirectDraw__GetVerticalBlankStatus(IDirectDrawImpl* This, LPB
 
 HRESULT __stdcall IDirectDraw__Initialize(IDirectDrawImpl* This, GUID* lpGUID)
 {
-    TRACE("NOT_IMPLEMENTED -> %s(This=%p)\n", __FUNCTION__, This);
+    TRACE("-> %s(This=%p)\n", __FUNCTION__, This);
     HRESULT ret = DD_OK;
-    TRACE("NOT_IMPLEMENTED <- %s\n", __FUNCTION__);
+    TRACE("<- %s\n", __FUNCTION__);
     return ret;
 }
 

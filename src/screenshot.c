@@ -36,7 +36,7 @@ static BOOL ss_screenshot_8bit(char* filename, IDirectDrawSurfaceImpl* src)
             &dst_buf, 
             &dst_buf_size, 
             dds_GetBuffer(src), 
-            src->l_pitch / src->lx_pitch, /* can't specify pitch so we use bitmap real width */
+            src->pitch / src->bytes_pp, /* can't specify pitch so we use bitmap real width */
             src->height,
             &state);
 
@@ -68,7 +68,7 @@ static BOOL ss_screenshot_16bit(char* filename, IDirectDrawSurfaceImpl* src)
             dds_GetBuffer(src),
             0,
             0,
-            src->l_pitch);
+            src->pitch);
 
         error = lodepng_encode32_file(filename, (unsigned char*)buf, src->width, src->height);
 
@@ -95,7 +95,7 @@ static BOOL ss_screenshot_32bit(char* filename, IDirectDrawSurfaceImpl* src)
             dds_GetBuffer(src),
             0,
             0,
-            src->l_pitch);
+            src->pitch);
 
         error = lodepng_encode32_file(filename, (unsigned char*)buf, src->width, src->height);
 

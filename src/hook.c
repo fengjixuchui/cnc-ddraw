@@ -40,12 +40,19 @@ CREATEWINDOWEXAPROC real_CreateWindowExA = CreateWindowExA;
 DESTROYWINDOWPROC real_DestroyWindow = DestroyWindow;
 MAPWINDOWPOINTSPROC real_MapWindowPoints = MapWindowPoints;
 SHOWWINDOWPROC real_ShowWindow = ShowWindow;
+GETTOPWINDOWPROC real_GetTopWindow = GetTopWindow;
+GETFOREGROUNDWINDOWPROC real_GetForegroundWindow = GetForegroundWindow;
+STRETCHBLTPROC real_StretchBlt = StretchBlt;
+SETDIBITSTODEVICEPROC real_SetDIBitsToDevice = SetDIBitsToDevice;
+STRETCHDIBITSPROC real_StretchDIBits = StretchDIBits;
 SETWINDOWSHOOKEXAPROC real_SetWindowsHookExA = SetWindowsHookExA;
+PEEKMESSAGEAPROC real_PeekMessageA = PeekMessageA;
 GETDEVICECAPSPROC real_GetDeviceCaps = GetDeviceCaps;
 LOADLIBRARYAPROC real_LoadLibraryA = LoadLibraryA;
 LOADLIBRARYWPROC real_LoadLibraryW = LoadLibraryW;
 LOADLIBRARYEXAPROC real_LoadLibraryExA = LoadLibraryExA;
 LOADLIBRARYEXWPROC real_LoadLibraryExW = LoadLibraryExW;
+GETDISKFREESPACEAPROC real_GetDiskFreeSpaceA = GetDiskFreeSpaceA;
 COCREATEINSTANCEPROC real_CoCreateInstance = CoCreateInstance;
 
 static HOOKLIST g_hooks[] =
@@ -76,12 +83,18 @@ static HOOKLIST g_hooks[] =
             { "DestroyWindow", (PROC)fake_DestroyWindow, (PROC*)&real_DestroyWindow, 0 },
             { "MapWindowPoints", (PROC)fake_MapWindowPoints, (PROC*)&real_MapWindowPoints, 0 },
             { "ShowWindow", (PROC)fake_ShowWindow, (PROC*)&real_ShowWindow, 0 },
+            { "GetTopWindow", (PROC)fake_GetTopWindow, (PROC*)&real_GetTopWindow, 0 },
+            { "GetForegroundWindow", (PROC)fake_GetForegroundWindow, (PROC*)&real_GetForegroundWindow, 0 },
+            { "PeekMessageA", (PROC)fake_PeekMessageA, (PROC*)&real_PeekMessageA, 0 },
             { "", NULL, NULL, 0 }
         }
     },
     {
         "gdi32.dll",
         {
+            { "StretchBlt", (PROC)fake_StretchBlt, (PROC*)&real_StretchBlt, SKIP_HOOK2 | SKIP_HOOK3 },
+            { "SetDIBitsToDevice", (PROC)fake_SetDIBitsToDevice, (PROC*)&real_SetDIBitsToDevice, SKIP_HOOK2 | SKIP_HOOK3 },
+            { "StretchDIBits", (PROC)fake_StretchDIBits, (PROC*)&real_StretchDIBits, SKIP_HOOK2 | SKIP_HOOK3 },
             { "GetDeviceCaps", (PROC)fake_GetDeviceCaps, (PROC*)&real_GetDeviceCaps, SKIP_HOOK3 },
             { "", NULL, NULL, 0 }
         }
@@ -394,6 +407,7 @@ void hook_create(HOOKLIST* hooks, BOOL initial_hook)
                         continue;
 
                     if (_strnicmp(game_dir, mod_dir, strlen(game_dir)) == 0 ||
+                        _strcmpi(mod_filename, "MSVFW32") == 0 ||
                         _strcmpi(mod_filename, "quartz") == 0 ||
                         _strcmpi(mod_filename, "winmm") == 0)
                     {
@@ -470,6 +484,7 @@ void hook_revert(HOOKLIST* hooks)
                     _splitpath(mod_path, NULL, mod_dir, mod_filename, NULL);
 
                     if (_strnicmp(game_dir, mod_dir, strlen(game_dir)) == 0 ||
+                        _strcmpi(mod_filename, "MSVFW32") == 0 ||
                         _strcmpi(mod_filename, "quartz") == 0 ||
                         _strcmpi(mod_filename, "winmm") == 0)
                     {
@@ -560,13 +575,16 @@ void hook_early_init()
     */
 
     hook_patch_iat(GetModuleHandle(NULL), FALSE, "ole32.dll", "CoCreateInstance", (PROC)fake_CoCreateInstance);
+    hook_patch_iat(GetModuleHandle("XIIIGame.dll"), FALSE, "ole32.dll", "CoCreateInstance", (PROC)fake_CoCreateInstance); //Hooligans
     hook_patch_iat(GetModuleHandle(NULL), FALSE, "dinput.dll", "DirectInputCreateA", (PROC)fake_DirectInputCreateA);
     hook_patch_iat(GetModuleHandle(NULL), FALSE, "dinput.dll", "DirectInputCreateW", (PROC)fake_DirectInputCreateW);
     hook_patch_iat(GetModuleHandle(NULL), FALSE, "dinput.dll", "DirectInputCreateEx", (PROC)fake_DirectInputCreateEx);
     hook_patch_iat(GetModuleHandle(NULL), FALSE, "dinput8.dll", "DirectInput8Create", (PROC)fake_DirectInput8Create);
     hook_patch_iat(GetModuleHandle(NULL), FALSE, "user32.dll", "GetClientRect", (PROC)fake_GetClientRect); //anno 1602
+    hook_patch_iat(GetModuleHandle(NULL), FALSE, "user32.dll", "ClipCursor", (PROC)fake_ClipCursor); //NexusTK
     hook_patch_iat(GetModuleHandle("AcGenral"), FALSE, "user32.dll", "SetWindowsHookExA", (PROC)fake_SetWindowsHookExA);
     hook_patch_iat(GetModuleHandle(NULL), FALSE, "user32.dll", "SetWindowsHookExA", (PROC)fake_SetWindowsHookExA);
+    hook_patch_iat(GetModuleHandle(NULL), FALSE, "kernel32.dll", "GetDiskFreeSpaceA", (PROC)fake_GetDiskFreeSpaceA);
 }
 
 void hook_exit()
@@ -616,11 +634,14 @@ void hook_exit()
     }
 
     hook_patch_iat(GetModuleHandle(NULL), TRUE, "ole32.dll", "CoCreateInstance", (PROC)fake_CoCreateInstance);
+    hook_patch_iat(GetModuleHandle("XIIIGame.dll"), TRUE, "ole32.dll", "CoCreateInstance", (PROC)fake_CoCreateInstance); //Hooligans
     hook_patch_iat(GetModuleHandle(NULL), TRUE, "dinput.dll", "DirectInputCreateA", (PROC)fake_DirectInputCreateA);
     hook_patch_iat(GetModuleHandle(NULL), TRUE, "dinput.dll", "DirectInputCreateW", (PROC)fake_DirectInputCreateW);
     hook_patch_iat(GetModuleHandle(NULL), TRUE, "dinput.dll", "DirectInputCreateEx", (PROC)fake_DirectInputCreateEx);
     hook_patch_iat(GetModuleHandle(NULL), TRUE, "dinput8.dll", "DirectInput8Create", (PROC)fake_DirectInput8Create);
     hook_patch_iat(GetModuleHandle(NULL), TRUE, "user32.dll", "GetClientRect", (PROC)fake_GetClientRect); //anno 1602
+    hook_patch_iat(GetModuleHandle(NULL), TRUE, "user32.dll", "ClipCursor", (PROC)fake_ClipCursor); //NexusTK
     hook_patch_iat(GetModuleHandle("AcGenral"), TRUE, "user32.dll", "SetWindowsHookExA", (PROC)fake_SetWindowsHookExA);
     hook_patch_iat(GetModuleHandle(NULL), TRUE, "user32.dll", "SetWindowsHookExA", (PROC)fake_SetWindowsHookExA);
+    hook_patch_iat(GetModuleHandle(NULL), TRUE, "kernel32.dll", "GetDiskFreeSpaceA", (PROC)fake_GetDiskFreeSpaceA);
 }

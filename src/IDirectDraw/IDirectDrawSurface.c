@@ -85,7 +85,7 @@ ULONG __stdcall IDirectDrawSurface__Release(IDirectDrawSurfaceImpl* This)
         {
             DeleteObject(This->bitmap);
         }
-        else if (This->surface)
+        else if (This->surface && !This->custom_buf)
         {
             HeapFree(GetProcessHeap(), 0, This->surface);
         }
@@ -95,6 +95,9 @@ ULONG __stdcall IDirectDrawSurface__Release(IDirectDrawSurfaceImpl* This)
 
         if (This->bmi)
             HeapFree(GetProcessHeap(), 0, This->bmi);
+
+        if (This->mapping)
+            CloseHandle(This->mapping);
 
         if (This->backbuffer)
             IDirectDrawSurface_Release(This->backbuffer);
@@ -106,6 +109,8 @@ ULONG __stdcall IDirectDrawSurface__Release(IDirectDrawSurfaceImpl* This)
         {
             IDirectDrawPalette_Release(This->palette);
         }
+
+        DeleteCriticalSection(&This->cs);
 
         HeapFree(GetProcessHeap(), 0, This);
     }
@@ -345,9 +350,9 @@ HRESULT __stdcall IDirectDrawSurface__Initialize(
     LPDIRECTDRAW lpDD,
     LPDDSURFACEDESC2 lpDDSurfaceDesc)
 {
-    TRACE("NOT_IMPLEMENTED -> %s(This=%p)\n", __FUNCTION__, This);
+    TRACE("-> %s(This=%p)\n", __FUNCTION__, This);
     HRESULT ret = DD_OK;
-    TRACE("NOT_IMPLEMENTED <- %s\n", __FUNCTION__);
+    TRACE("<- %s\n", __FUNCTION__);
     return ret;
 }
 
@@ -496,9 +501,9 @@ HRESULT __stdcall IDirectDrawSurface__PageUnlock(IDirectDrawSurfaceImpl* This, D
 
 HRESULT __stdcall IDirectDrawSurface__SetSurfaceDesc(IDirectDrawSurfaceImpl* This, LPDDSURFACEDESC2 lpDDSD, DWORD dwFlags)
 {
-    TRACE("NOT_IMPLEMENTED -> %s(This=%p)\n", __FUNCTION__, This);
-    HRESULT ret = DDERR_UNSUPPORTED;
-    TRACE("NOT_IMPLEMENTED <- %s\n", __FUNCTION__);
+    TRACE("-> %s(This=%p, lpDDSD=%p, dwFlags=%08X)\n", __FUNCTION__, This, lpDDSD, dwFlags);
+    HRESULT ret = dds_SetSurfaceDesc(This, lpDDSD, dwFlags);
+    TRACE("<- %s\n", __FUNCTION__);
     return ret;
 }
 

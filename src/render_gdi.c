@@ -6,6 +6,7 @@
 #include "opengl_utils.h"
 #include "utils.h"
 #include "wndproc.h"
+#include "hook.h"
 #include "debug.h"
 
 
@@ -17,6 +18,8 @@ DWORD WINAPI gdi_render_main(void)
     if (g_ddraw->show_driver_warning)
     {
         g_ddraw->show_driver_warning = FALSE;
+
+        TRACE("     Switched to GDI renderer\n");        
 
         warning_end_tick = timeGetTime() + (15 * 1000);
 
@@ -53,6 +56,9 @@ DWORD WINAPI gdi_render_main(void)
             g_ddraw->primary->height == g_ddraw->height &&
             (g_ddraw->bpp == 16 || g_ddraw->bpp == 32 || g_ddraw->primary->palette))
         {
+            if (g_ddraw->lock_surfaces)
+                EnterCriticalSection(&g_ddraw->primary->cs);
+
             if (warning_end_tick)
             {
                 if (timeGetTime() < warning_end_tick)
@@ -104,7 +110,7 @@ DWORD WINAPI gdi_render_main(void)
             }
             else if (upscale_hack)
             {
-                StretchDIBits(
+                real_StretchDIBits(
                     g_ddraw->render.hdc,
                     g_ddraw->render.viewport.x,
                     g_ddraw->render.viewport.y,
@@ -122,7 +128,7 @@ DWORD WINAPI gdi_render_main(void)
             else if (!g_ddraw->child_window_exists &&
                 (g_ddraw->render.width != g_ddraw->width || g_ddraw->render.height != g_ddraw->height))
             {
-                StretchDIBits(
+                real_StretchDIBits(
                     g_ddraw->render.hdc,
                     g_ddraw->render.viewport.x,
                     g_ddraw->render.viewport.y,
@@ -139,7 +145,7 @@ DWORD WINAPI gdi_render_main(void)
             }
             else
             {
-                SetDIBitsToDevice(
+                real_SetDIBitsToDevice(
                     g_ddraw->render.hdc,
                     0,
                     0,
@@ -153,6 +159,9 @@ DWORD WINAPI gdi_render_main(void)
                     g_ddraw->primary->bmi,
                     DIB_RGB_COLORS);
             }
+
+            if (g_ddraw->lock_surfaces)
+                LeaveCriticalSection(&g_ddraw->primary->cs);
         }
 
         LeaveCriticalSection(&g_ddraw->cs);

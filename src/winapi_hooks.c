@@ -11,6 +11,7 @@
 #include "mouse.h"
 #include "wndproc.h"
 #include "render_gdi.h"
+#include "ddsurface.h"
 
 
 BOOL WINAPI fake_GetCursorPos(LPPOINT lpPoint)
@@ -23,7 +24,7 @@ BOOL WINAPI fake_GetCursorPos(LPPOINT lpPoint)
     realpt.x = pt.x;
     realpt.y = pt.y;
 
-    if (g_ddraw->locked && (!g_ddraw->windowed || real_ScreenToClient(g_ddraw->hwnd, &pt)))
+    if (g_mouse_locked && (!g_ddraw->windowed || real_ScreenToClient(g_ddraw->hwnd, &pt)))
     {
         /* fallback solution for possible ClipCursor failure */
         int diffx = 0, diffy = 0;
@@ -152,7 +153,7 @@ BOOL WINAPI fake_ClipCursor(const RECT* lpRect)
 
         CopyRect(&g_ddraw->mouse.rc, &dst_rc);
 
-        if (g_ddraw->locked)
+        if (g_mouse_locked && !IsIconic(g_ddraw->hwnd))
         {
             real_MapWindowPoints(g_ddraw->hwnd, HWND_DESKTOP, (LPPOINT)&dst_rc, 2);
 
@@ -167,7 +168,7 @@ int WINAPI fake_ShowCursor(BOOL bShow)
 {
     if (g_ddraw)
     {
-        if (g_ddraw->locked || g_ddraw->devmode)
+        if (g_mouse_locked || g_ddraw->devmode)
         {
             int count = real_ShowCursor(bShow);
             InterlockedExchange((LONG*)&g_ddraw->show_cursor_count, count);
@@ -190,7 +191,7 @@ HCURSOR WINAPI fake_SetCursor(HCURSOR hCursor)
     {
         HCURSOR cursor = (HCURSOR)InterlockedExchange((LONG*)&g_ddraw->old_cursor, (LONG)hCursor);
 
-        if (!g_ddraw->locked && !g_ddraw->devmode)
+        if (!g_mouse_locked && !g_ddraw->devmode)
             return cursor;
     }
 
@@ -265,7 +266,7 @@ BOOL WINAPI fake_ScreenToClient(HWND hWnd, LPPOINT lpPoint)
 
 BOOL WINAPI fake_SetCursorPos(int X, int Y)
 {
-    if (g_ddraw && !g_ddraw->locked && !g_ddraw->devmode)
+    if (g_ddraw && !g_mouse_locked && !g_ddraw->devmode)
         return TRUE;
 
     POINT pt = { X, Y };
@@ -516,6 +517,26 @@ BOOL WINAPI fake_ShowWindow(HWND hWnd, int nCmdShow)
     return real_ShowWindow(hWnd, nCmdShow);
 }
 
+HWND WINAPI fake_GetTopWindow(HWND hWnd)
+{
+    if (g_ddraw && g_ddraw->windowed && g_ddraw->hwnd && !hWnd)
+    {
+        return g_ddraw->hwnd;
+    }
+
+    return real_GetTopWindow(hWnd);
+}
+
+HWND WINAPI fake_GetForegroundWindow()
+{
+    if (g_ddraw && g_ddraw->windowed && g_ddraw->hwnd)
+    {
+        return g_ddraw->hwnd;
+    }
+
+    return real_GetForegroundWindow();
+}
+
 HHOOK WINAPI fake_SetWindowsHookExA(int idHook, HOOKPROC lpfn, HINSTANCE hmod, DWORD dwThreadId)
 {
     if (idHook == WH_KEYBOARD_LL && hmod && GetModuleHandle("AcGenral") == hmod)
@@ -532,6 +553,102 @@ HHOOK WINAPI fake_SetWindowsHookExA(int idHook, HOOKPROC lpfn, HINSTANCE hmod, D
     return real_SetWindowsHookExA(idHook, lpfn, hmod, dwThreadId);
 }
 
+BOOL WINAPI fake_PeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg)
+{
+    BOOL result = real_PeekMessageA(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
+
+    if (result && g_ddraw && g_ddraw->hook_peekmessage)
+    {
+        switch (lpMsg->message)
+        {
+        case WM_LBUTTONUP:
+        case WM_RBUTTONUP:
+        case WM_MBUTTONUP:
+        {
+            if (!g_ddraw->devmode && !g_mouse_locked)
+            {
+                int x = GET_X_LPARAM(lpMsg->lParam);
+                int y = GET_Y_LPARAM(lpMsg->lParam);
+
+                if (x > g_ddraw->render.viewport.x + g_ddraw->render.viewport.width ||
+                    x < g_ddraw->render.viewport.x ||
+                    y > g_ddraw->render.viewport.y + g_ddraw->render.viewport.height ||
+                    y < g_ddraw->render.viewport.y)
+                {
+                    x = g_ddraw->width / 2;
+                    y = g_ddraw->height / 2;
+                }
+                else
+                {
+                    x = (DWORD)((x - g_ddraw->render.viewport.x) * g_ddraw->render.unscale_w);
+                    y = (DWORD)((y - g_ddraw->render.viewport.y) * g_ddraw->render.unscale_h);
+                }
+
+                InterlockedExchange((LONG*)&g_ddraw->cursor.x, x);
+                InterlockedExchange((LONG*)&g_ddraw->cursor.y, y);
+
+                mouse_lock();
+                return FALSE;
+            }
+            /* fall through for lParam */
+        }
+        /* down messages are ignored if we have no cursor lock */
+        case WM_XBUTTONDBLCLK:
+        case WM_XBUTTONDOWN:
+        case WM_XBUTTONUP:
+        case WM_MOUSEWHEEL:
+        case WM_MOUSEHOVER:
+        case WM_LBUTTONDBLCLK:
+        case WM_MBUTTONDBLCLK:
+        case WM_RBUTTONDBLCLK:
+        case WM_LBUTTONDOWN:
+        case WM_RBUTTONDOWN:
+        case WM_MBUTTONDOWN:
+        case WM_MOUSEMOVE:
+        {
+            if (!g_ddraw->devmode && !g_mouse_locked)
+            {
+                return FALSE;
+            }
+
+            int x = max(GET_X_LPARAM(lpMsg->lParam) - g_ddraw->mouse.x_adjust, 0);
+            int y = max(GET_Y_LPARAM(lpMsg->lParam) - g_ddraw->mouse.y_adjust, 0);
+
+            if (g_ddraw->adjmouse)
+            {
+                if (g_ddraw->vhack && !g_ddraw->devmode)
+                {
+                    POINT pt = { 0, 0 };
+                    fake_GetCursorPos(&pt);
+
+                    x = pt.x;
+                    y = pt.y;
+                }
+                else
+                {
+                    x = (DWORD)(roundf(x * g_ddraw->render.unscale_w));
+                    y = (DWORD)(roundf(y * g_ddraw->render.unscale_h));
+                }
+            }
+
+            x = min(x, g_ddraw->width - 1);
+            y = min(y, g_ddraw->height - 1);
+
+            InterlockedExchange((LONG*)&g_ddraw->cursor.x, x);
+            InterlockedExchange((LONG*)&g_ddraw->cursor.y, y);
+
+            lpMsg->lParam = MAKELPARAM(x, y);
+            fake_GetCursorPos(&lpMsg->pt);
+
+            break;
+        }
+            
+        }
+    }
+
+    return result;
+}
+
 int WINAPI fake_GetDeviceCaps(HDC hdc, int index)
 {
     if (g_ddraw &&
@@ -541,8 +658,210 @@ int WINAPI fake_GetDeviceCaps(HDC hdc, int index)
     {
         return g_ddraw->bpp;
     }
+    
+    if (g_ddraw &&
+        g_ddraw->bpp == 8 &&
+        index == RASTERCAPS &&
+        (g_hook_method != 2 || g_ddraw->renderer == gdi_render_main))
+    {
+        return RC_PALETTE | real_GetDeviceCaps(hdc, index);
+    }
 
     return real_GetDeviceCaps(hdc, index);
+}
+
+BOOL WINAPI fake_StretchBlt(
+    HDC hdcDest,
+    int xDest,
+    int yDest,
+    int wDest,
+    int hDest,
+    HDC hdcSrc,
+    int xSrc,
+    int ySrc,
+    int wSrc,
+    int hSrc,
+    DWORD rop)
+{
+    HWND hwnd = WindowFromDC(hdcDest);
+
+    char class_name[MAX_PATH] = { 0 };
+
+    if (g_ddraw && g_ddraw->hwnd && hwnd && hwnd != g_ddraw->hwnd)
+    {
+        GetClassNameA(hwnd, class_name, sizeof(class_name) - 1);
+    }
+
+    if (g_ddraw && g_ddraw->hwnd &&
+        (hwnd == g_ddraw->hwnd ||
+            (g_ddraw->fixchilds && IsChild(g_ddraw->hwnd, hwnd) &&
+                (g_ddraw->fixchilds == FIX_CHILDS_DETECT_HIDE ||
+                    strcmp(class_name, "AVIWnd32") == 0 ||
+                    strcmp(class_name, "MCIWndClass") == 0))))
+    {
+        if (g_ddraw->primary && (g_ddraw->primary->bpp == 16 || g_ddraw->primary->bpp == 32 || g_ddraw->primary->palette))
+        {
+            HDC primary_dc;
+            dds_GetDC(g_ddraw->primary, &primary_dc);
+
+            if (primary_dc)
+            {
+                BOOL result =
+                    real_StretchBlt(primary_dc, xDest, yDest, wDest, hDest, hdcSrc, xSrc, ySrc, wSrc, hSrc, rop);
+
+                dds_ReleaseDC(g_ddraw->primary, primary_dc);
+
+                return result;
+            }
+        }
+        else if (g_ddraw->width > 0 && g_ddraw->render.hdc)
+        {
+            return real_StretchBlt(
+                g_ddraw->render.hdc,
+                xDest + g_ddraw->render.viewport.x,
+                yDest + g_ddraw->render.viewport.y,
+                (int)(wDest * g_ddraw->render.scale_w),
+                (int)(hDest * g_ddraw->render.scale_h),
+                hdcSrc,
+                xSrc,
+                ySrc,
+                wSrc,
+                hSrc,
+                rop);
+        }
+    }
+
+    return real_StretchBlt(hdcDest, xDest, yDest, wDest, hDest, hdcSrc, xSrc, ySrc, wSrc, hSrc, rop);
+}
+
+int WINAPI fake_SetDIBitsToDevice(
+    HDC hdc,
+    int xDest,
+    int yDest,
+    DWORD w,
+    DWORD h,
+    int xSrc,
+    int ySrc,
+    UINT StartScan,
+    UINT cLines,
+    const VOID* lpvBits,
+    const BITMAPINFO* lpbmi,
+    UINT ColorUse)
+{
+    if (g_ddraw && g_ddraw->hwnd && WindowFromDC(hdc) == g_ddraw->hwnd)
+    {
+        if (g_ddraw->primary && (g_ddraw->primary->bpp == 16 || g_ddraw->primary->bpp == 32 || g_ddraw->primary->palette))
+        {
+            HDC primary_dc;
+            dds_GetDC(g_ddraw->primary, &primary_dc);
+
+            if (primary_dc)
+            {
+                int result =
+                    real_SetDIBitsToDevice(
+                        primary_dc, 
+                        xDest, 
+                        yDest, 
+                        w, 
+                        h, 
+                        xSrc, 
+                        ySrc, 
+                        StartScan, 
+                        cLines, 
+                        lpvBits, 
+                        lpbmi, 
+                        ColorUse);
+
+                dds_ReleaseDC(g_ddraw->primary, primary_dc);
+
+                return result;
+            }
+        }
+    }
+
+    return real_SetDIBitsToDevice(hdc, xDest, yDest, w, h, xSrc, ySrc, StartScan, cLines, lpvBits, lpbmi, ColorUse);
+}
+
+int WINAPI fake_StretchDIBits(
+    HDC hdc,
+    int xDest,
+    int yDest,
+    int DestWidth,
+    int DestHeight,
+    int xSrc,
+    int ySrc,
+    int SrcWidth,
+    int SrcHeight,
+    const VOID* lpBits,
+    const BITMAPINFO* lpbmi,
+    UINT iUsage,
+    DWORD rop)
+{
+    if (g_ddraw && g_ddraw->hwnd && WindowFromDC(hdc) == g_ddraw->hwnd)
+    {
+        if (g_ddraw->primary && (g_ddraw->primary->bpp == 16 || g_ddraw->primary->bpp == 32 || g_ddraw->primary->palette))
+        {
+            HDC primary_dc;
+            dds_GetDC(g_ddraw->primary, &primary_dc);
+
+            if (primary_dc)
+            {
+                int result =
+                    real_StretchDIBits(
+                        primary_dc,
+                        xDest,
+                        yDest,
+                        DestWidth,
+                        DestHeight,
+                        xSrc,
+                        ySrc,
+                        SrcWidth,
+                        SrcHeight,
+                        lpBits,
+                        lpbmi,
+                        iUsage,
+                        rop);
+
+                dds_ReleaseDC(g_ddraw->primary, primary_dc);
+
+                return result;
+            }
+        }
+        else if (g_ddraw->width > 0)
+        {
+            return
+                real_StretchDIBits(
+                    hdc,
+                    xDest + g_ddraw->render.viewport.x,
+                    yDest + g_ddraw->render.viewport.y,
+                    (int)(DestWidth * g_ddraw->render.scale_w),
+                    (int)(DestHeight * g_ddraw->render.scale_h),
+                    xSrc,
+                    ySrc,
+                    SrcWidth,
+                    SrcHeight,
+                    lpBits,
+                    lpbmi,
+                    iUsage,
+                    rop);
+        }
+    }
+
+    return 
+        real_StretchDIBits(
+            hdc, 
+            xDest, 
+            yDest, 
+            DestWidth, 
+            DestHeight, 
+            xSrc, 
+            ySrc, 
+            SrcWidth, 
+            SrcHeight, 
+            lpBits, 
+            lpbmi, 
+            iUsage, 
+            rop);
 }
 
 HMODULE WINAPI fake_LoadLibraryA(LPCSTR lpLibFileName)
@@ -579,6 +898,39 @@ HMODULE WINAPI fake_LoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dw
     hook_init();
 
     return hmod;
+}
+
+BOOL WINAPI fake_GetDiskFreeSpaceA(
+    LPCSTR lpRootPathName,
+    LPDWORD lpSectorsPerCluster,
+    LPDWORD lpBytesPerSector,
+    LPDWORD lpNumberOfFreeClusters,
+    LPDWORD lpTotalNumberOfClusters)
+{
+    BOOL result = 
+        real_GetDiskFreeSpaceA(
+            lpRootPathName,
+            lpSectorsPerCluster,
+            lpBytesPerSector,
+            lpNumberOfFreeClusters,
+            lpTotalNumberOfClusters);
+
+    if (result && lpSectorsPerCluster && lpBytesPerSector && lpNumberOfFreeClusters)
+    {
+        long long int free_bytes = (long long int)*lpNumberOfFreeClusters * *lpSectorsPerCluster * *lpBytesPerSector;
+
+        if (free_bytes >= 2147155968)
+        {
+            *lpSectorsPerCluster = 0x00000040;
+            *lpBytesPerSector = 0x00000200;
+            *lpNumberOfFreeClusters = 0x0000FFF6;
+
+            if (lpTotalNumberOfClusters)
+                *lpTotalNumberOfClusters = 0x0000FFF6;
+        }
+    }
+
+    return result; 
 }
 
 BOOL WINAPI fake_DestroyWindow(HWND hWnd)

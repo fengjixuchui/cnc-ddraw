@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <intrin.h>
 #include "ddraw.h"
 #include "debug.h"
 #include "dd.h"
@@ -10,8 +11,60 @@
 #include "config.h"
 
 
+BOOL util_is_avx_supported()
+{
+    const DWORD XMM_STATE_BIT = 1 << 1;
+    const DWORD YMM_STATE_BIT = 1 << 2;
+    const DWORD OS_AVX_BITS = XMM_STATE_BIT | YMM_STATE_BIT;
+
+    const DWORD AVX_BIT = 1 << 28;
+    const DWORD OSXSAVE_BIT = 1 << 27;
+    const DWORD XSAVE_BIT = 1 << 26;
+    const DWORD CPU_AVX_BITS = AVX_BIT | OSXSAVE_BIT | XSAVE_BIT;
+
+    BOOL result = FALSE;
+
+#ifdef _MSC_VER
+    __try
+    {
+#endif
+
+    int info[4] = { 0 };
+    __cpuid(info, 0);
+
+    if (info[0] >= 1) 
+    {
+        __cpuid(info, 1);
+
+        if ((info[2] & CPU_AVX_BITS) == CPU_AVX_BITS)
+        {
+            unsigned int xcr0 = 0;
+
+#ifdef _MSC_VER
+            xcr0 = (unsigned int)_xgetbv(_XCR_XFEATURE_ENABLED_MASK);
+#elif __AVX__
+            __asm__("xgetbv" : "=a" (xcr0) : "c" (0) : "%edx");
+#endif
+
+            result = (xcr0 & OS_AVX_BITS) == OS_AVX_BITS;
+        }
+    }
+
+#ifdef _MSC_VER
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+    }
+#endif
+
+    return result;
+}
+
 void util_limit_game_ticks()
 {
+    if (GetCurrentThreadId() != g_ddraw->gui_thread_id)
+        return;
+
     if (g_ddraw->ticks_limiter.htimer)
     {
         FILETIME ft = { 0 };
@@ -197,8 +250,8 @@ void util_toggle_maximize()
     RECT client_rc;
     RECT dst_rc;
 
-    LONG style = GetWindowLong(g_ddraw->hwnd, GWL_STYLE);
-    LONG exstyle = GetWindowLong(g_ddraw->hwnd, GWL_EXSTYLE);
+    LONG style = real_GetWindowLongA(g_ddraw->hwnd, GWL_STYLE);
+    LONG exstyle = real_GetWindowLongA(g_ddraw->hwnd, GWL_EXSTYLE);
     BOOL got_menu = GetMenu(g_ddraw->hwnd) != NULL;
 
     if (real_GetClientRect(g_ddraw->hwnd, &client_rc) && SystemParametersInfo(SPI_GETWORKAREA, 0, &dst_rc, 0))
@@ -285,13 +338,6 @@ void util_toggle_fullscreen()
         mouse_unlock();
 
         g_config.window_state = g_ddraw->windowed = FALSE;
-        LONG style = GetWindowLong(g_ddraw->hwnd, GWL_STYLE);
-
-        real_SetWindowLongA(
-            g_ddraw->hwnd,
-            GWL_STYLE,
-            style & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU));
-
         dd_SetDisplayMode(g_ddraw->width, g_ddraw->height, g_ddraw->bpp, SDM_LEAVE_WINDOWED);
         util_update_bnet_pos(0, 0);
 
@@ -304,7 +350,7 @@ void util_toggle_fullscreen()
 
         if (g_ddraw->renderer == d3d9_render_main)
         {
-            d3d9_reset();
+            d3d9_reset(g_ddraw->windowed);
         }
         else
         {
@@ -383,9 +429,17 @@ BOOL CALLBACK util_enum_child_proc(HWND hwnd, LPARAM lparam)
             pos.top);
         */
 
-        if (g_ddraw->fixchilds == FIX_CHILDS_DETECT_HIDE)
+        char class_name[MAX_PATH] = { 0 };
+        GetClassNameA(hwnd, class_name, sizeof(class_name) - 1);
+
+        //TRACE_EXT("     AVIWINDOW class=%s\n", class_name);
+
+        if (g_ddraw->fixchilds == FIX_CHILDS_DETECT_HIDE || 
+            strcmp(class_name, "VideoRenderer") == 0 ||
+            strcmp(class_name, "AVIWnd32") == 0 || 
+            strcmp(class_name, "MCIWndClass") == 0)
         {
-            LONG style = GetWindowLong(hwnd, GWL_EXSTYLE);
+            LONG style = real_GetWindowLongA(hwnd, GWL_EXSTYLE);
 
             if (!(style & WS_EX_TRANSPARENT))
             {
@@ -428,7 +482,7 @@ BOOL CALLBACK util_enum_child_proc(HWND hwnd, LPARAM lparam)
 static unsigned char util_get_pixel(int x, int y)
 {
     return ((unsigned char*)dds_GetBuffer(
-        g_ddraw->primary))[y * g_ddraw->primary->l_pitch + x * g_ddraw->primary->lx_pitch];
+        g_ddraw->primary))[y * g_ddraw->primary->pitch + x * g_ddraw->primary->bytes_pp];
 }
 
 BOOL util_detect_low_res_screen()

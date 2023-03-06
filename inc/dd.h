@@ -117,7 +117,6 @@ typedef struct CNCDDRAW
     HWND hwnd;
     WNDPROC wndproc;
     struct { DWORD x; DWORD y; } cursor;
-    BOOL locked;
     BOOL adjmouse;
     BOOL devmode;
     BOOL vsync;
@@ -139,6 +138,8 @@ typedef struct CNCDDRAW
     BOOL novidmem;
     BOOL fpupreserve;
     BOOL allow_wmactivate;
+    int d3d9_adapter;
+    BOOL opengl_core;
     BOOL accurate_timers;
     BOOL resizable;
     BOOL nonexclusive;
@@ -147,9 +148,14 @@ typedef struct CNCDDRAW
     BOOL fixnotresponding;
     BOOL flipclear;
     BOOL locktopleft;
+    BOOL lock_surfaces;
     BOOL d3d9linear;
     BOOL gdilinear;
+    BOOL d3d9on12;
+    int guard_lines;
     int resolutions;
+    int max_resolutions;
+    BOOL limit_bltfast;
     BOOL armadahack;
     BOOL tshack;
     BOOL infantryhack;
@@ -168,6 +174,9 @@ typedef struct CNCDDRAW
     BOOL show_driver_warning;
     SPEEDLIMITER ticks_limiter;
     SPEEDLIMITER flip_limiter;
+    DWORD gui_thread_id;
+    BOOL rgb555;
+    BOOL hook_peekmessage;
 
 } CNCDDRAW;
 

@@ -23,7 +23,10 @@ HRESULT dd_EnumDisplayModes(
     LPVOID lpContext,
     LPDDENUMMODESCALLBACK lpEnumModesCallback)
 {
+    dbg_dump_edm_flags(dwFlags);
+
     DWORD i = 0;
+    DWORD res_count = 0;
     DDSURFACEDESC2 s;
 
     /* Some games crash when you feed them with too many resolutions so we have to keep the list short */
@@ -50,8 +53,10 @@ HRESULT dd_EnumDisplayModes(
         { 640, 480 },
         { 800, 600 },
         { 1024, 768 },
+        { g_ddraw->resolutions == RESLIST_FULL ? 1280 : 0, g_ddraw->resolutions == RESLIST_FULL ? 960 : 0 },
         { 1280, 1024 },
         { 1600, 1200 },
+        { g_ddraw->resolutions == RESLIST_FULL ? 2048 : 0, g_ddraw->resolutions == RESLIST_FULL ? 1536 : 0 },
         { 1280, 720 },
         { max_w, max_h },
     };
@@ -65,7 +70,7 @@ HRESULT dd_EnumDisplayModes(
         }
     }
 
-    if (g_ddraw->bpp || g_ddraw->resolutions == RESLIST_FULL)
+    if ((g_ddraw->bpp && g_ddraw->resolutions == RESLIST_NORMAL) || g_ddraw->resolutions == RESLIST_FULL)
     {
         TRACE("     g_ddraw->bpp=%u\n", g_ddraw->bpp);
 
@@ -142,6 +147,12 @@ HRESULT dd_EnumDisplayModes(
 
                 if (g_ddraw->bpp == 8 || g_ddraw->resolutions == RESLIST_FULL)
                 {
+                    if (g_ddraw->max_resolutions && res_count++ >= g_ddraw->max_resolutions)
+                    {
+                        TRACE("     resolution limit reached, stopping\n");
+                        return DD_OK;
+                    }
+
                     if (lpEnumModesCallback((LPDDSURFACEDESC)&s, lpContext) == DDENUMRET_CANCEL)
                     {
                         TRACE("     DDENUMRET_CANCEL returned, stopping\n");
@@ -158,6 +169,12 @@ HRESULT dd_EnumDisplayModes(
 
                 if (g_ddraw->bpp == 16 || g_ddraw->resolutions == RESLIST_FULL)
                 {
+                    if (g_ddraw->max_resolutions && res_count++ >= g_ddraw->max_resolutions)
+                    {
+                        TRACE("     resolution limit reached, stopping\n");
+                        return DD_OK;
+                    }
+
                     if (lpEnumModesCallback((LPDDSURFACEDESC)&s, lpContext) == DDENUMRET_CANCEL)
                     {
                         TRACE("     DDENUMRET_CANCEL returned, stopping\n");
@@ -174,6 +191,12 @@ HRESULT dd_EnumDisplayModes(
 
                 if (g_ddraw->bpp == 32 || g_ddraw->resolutions == RESLIST_FULL)
                 {
+                    if (g_ddraw->max_resolutions && res_count++ >= g_ddraw->max_resolutions)
+                    {
+                        TRACE("     resolution limit reached, stopping\n");
+                        return DD_OK;
+                    }
+
                     if (lpEnumModesCallback((LPDDSURFACEDESC)&s, lpContext) == DDENUMRET_CANCEL)
                     {
                         TRACE("     DDENUMRET_CANCEL returned, stopping\n");
@@ -197,7 +220,7 @@ HRESULT dd_EnumDisplayModes(
         }
     }
 
-    if (!g_ddraw->bpp || g_ddraw->resolutions == RESLIST_FULL)
+    if (!g_ddraw->bpp || g_ddraw->resolutions != RESLIST_NORMAL)
     {
         for (i = 0; i < sizeof(resolutions) / sizeof(resolutions[0]); i++)
         {
@@ -231,6 +254,12 @@ HRESULT dd_EnumDisplayModes(
             s.dwWidth = resolutions[i].cx;
             s.lPitch = ((s.dwWidth * s.ddpfPixelFormat.dwRGBBitCount + 31) & ~31) >> 3;
 
+            if (g_ddraw->max_resolutions && res_count++ >= g_ddraw->max_resolutions)
+            {
+                TRACE("     resolution limit reached, stopping\n");
+                return DD_OK;
+            }
+
             if (lpEnumModesCallback((LPDDSURFACEDESC)&s, lpContext) == DDENUMRET_CANCEL)
             {
                 TRACE("     DDENUMRET_CANCEL returned, stopping\n");
@@ -243,6 +272,12 @@ HRESULT dd_EnumDisplayModes(
             s.ddpfPixelFormat.dwGBitMask = 0x07E0;
             s.ddpfPixelFormat.dwBBitMask = 0x001F;
             s.lPitch = ((s.dwWidth * s.ddpfPixelFormat.dwRGBBitCount + 31) & ~31) >> 3;
+
+            if (g_ddraw->max_resolutions && res_count++ >= g_ddraw->max_resolutions)
+            {
+                TRACE("     resolution limit reached, stopping\n");
+                return DD_OK;
+            }
 
             if (lpEnumModesCallback((LPDDSURFACEDESC)&s, lpContext) == DDENUMRET_CANCEL)
             {
@@ -259,6 +294,12 @@ HRESULT dd_EnumDisplayModes(
             s.ddpfPixelFormat.dwGBitMask = 0x00FF00;
             s.ddpfPixelFormat.dwBBitMask = 0x0000FF;
             s.lPitch = ((s.dwWidth * s.ddpfPixelFormat.dwRGBBitCount + 31) & ~31) >> 3;
+
+            if (g_ddraw->max_resolutions && res_count++ >= g_ddraw->max_resolutions)
+            {
+                TRACE("     resolution limit reached, stopping\n");
+                return DD_OK;
+            }
 
             if (lpEnumModesCallback((LPDDSURFACEDESC)&s, lpContext) == DDENUMRET_CANCEL)
             {
@@ -392,16 +433,16 @@ HRESULT dd_RestoreDisplayMode()
             WaitForSingleObject(g_ddraw->render.thread, INFINITE);
             g_ddraw->render.thread = NULL;
         }
-
-        if (g_ddraw->renderer == d3d9_render_main)
-        {
-            d3d9_release();
-        }
     }
 
     if (!g_ddraw->windowed)
     {
-        if (g_ddraw->renderer != d3d9_render_main)
+        if (g_ddraw->renderer == d3d9_render_main)
+        {
+            if (!d3d9_reset(TRUE))
+                d3d9_release();
+        }
+        else
         {
             ChangeDisplaySettings(NULL, 0);
         }
@@ -502,7 +543,8 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
 
     g_ddraw->render.run = TRUE;
 
-    BOOL lock_mouse = (g_ddraw->locked || g_ddraw->fullscreen) && !(dwFlags & SDM_LEAVE_FULLSCREEN);
+    BOOL lock_mouse = g_mouse_locked;
+
     mouse_unlock();
 
     memset(&g_ddraw->render.mode, 0, sizeof(DEVMODE));
@@ -677,15 +719,16 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
             real_SetWindowLongA(
                 g_ddraw->hwnd,
                 GWL_STYLE,
-                GetWindowLong(
-                    g_ddraw->hwnd, GWL_STYLE) & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU));
+                real_GetWindowLongA(
+                    g_ddraw->hwnd, 
+                    GWL_STYLE) & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU));
         }
         else
         {
             real_SetWindowLongA(
                 g_ddraw->hwnd,
                 GWL_STYLE,
-                (GetWindowLong(g_ddraw->hwnd, GWL_STYLE) | WS_OVERLAPPEDWINDOW) & ~WS_MAXIMIZE);
+                (real_GetWindowLongA(g_ddraw->hwnd, GWL_STYLE) | WS_OVERLAPPEDWINDOW) & ~WS_MAXIMIZE);
         }
 
         if (g_ddraw->wine)
@@ -693,7 +736,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
             real_SetWindowLongA(
                 g_ddraw->hwnd,
                 GWL_STYLE,
-                (GetWindowLong(g_ddraw->hwnd, GWL_STYLE) | WS_MINIMIZEBOX) & ~(WS_MAXIMIZEBOX | WS_THICKFRAME));
+                (real_GetWindowLongA(g_ddraw->hwnd, GWL_STYLE) | WS_MINIMIZEBOX) & ~(WS_MAXIMIZEBOX | WS_THICKFRAME));
         }
 
         /* center the window with correct dimensions */
@@ -702,11 +745,27 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
         int x = (g_config.window_rect.left != -32000) ? g_config.window_rect.left : (cy / 2) - (g_ddraw->render.width / 2);
         int y = (g_config.window_rect.top != -32000) ? g_config.window_rect.top : (cx / 2) - (g_ddraw->render.height / 2);
 
+        if (nonexclusive)
+        {
+            x = y = 0;
+        }
+
+        if (IsIconic(g_ddraw->hwnd))
+            real_ShowWindow(g_ddraw->hwnd, SW_RESTORE);
+
         RECT dst = { x, y, g_ddraw->render.width + x, g_ddraw->render.height + y };
 
-        AdjustWindowRect(&dst, GetWindowLong(g_ddraw->hwnd, GWL_STYLE), GetMenu(g_ddraw->hwnd) != NULL);
-        real_SetWindowPos(g_ddraw->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
-        real_MoveWindow(g_ddraw->hwnd, dst.left, dst.top, (dst.right - dst.left), (dst.bottom - dst.top), TRUE);
+        LONG style = real_GetWindowLongA(g_ddraw->hwnd, GWL_STYLE);
+        LONG exstyle = real_GetWindowLongA(g_ddraw->hwnd, GWL_EXSTYLE);
+        
+        AdjustWindowRectEx(&dst, style, GetMenu(g_ddraw->hwnd) != NULL, exstyle);
+        
+        real_SetWindowPos(
+            g_ddraw->hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
+
+        real_MoveWindow(
+            g_ddraw->hwnd, dst.left, dst.top, (dst.right - dst.left), (dst.bottom - dst.top), TRUE);
+
 
         BOOL d3d9_active = FALSE;
 
@@ -722,15 +781,19 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
             }
         }
 
-        if (lock_mouse)
+        if (lock_mouse || (g_ddraw->fullscreen && real_GetForegroundWindow() == g_ddraw->hwnd))
             mouse_lock();
     }
     else
     {
-        LONG style = GetWindowLong(g_ddraw->hwnd, GWL_STYLE);
+        LONG style = real_GetWindowLongA(g_ddraw->hwnd, GWL_STYLE);
+
+        DWORD swp_flags = SWP_SHOWWINDOW;
 
         if ((style & WS_CAPTION))
         {
+            swp_flags |= SWP_FRAMECHANGED;
+
             real_SetWindowLongA(
                 g_ddraw->hwnd,
                 GWL_STYLE,
@@ -760,8 +823,14 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
 
         if (g_ddraw->wine)
         {
-            real_SetWindowLongA(g_ddraw->hwnd, GWL_STYLE, GetWindowLong(g_ddraw->hwnd, GWL_STYLE) | WS_MINIMIZEBOX);
+            real_SetWindowLongA(
+                g_ddraw->hwnd, 
+                GWL_STYLE, 
+                real_GetWindowLongA(g_ddraw->hwnd, GWL_STYLE) | WS_MINIMIZEBOX);
         }
+
+        if (IsIconic(g_ddraw->hwnd))
+            real_ShowWindow(g_ddraw->hwnd, SW_RESTORE);
 
         real_SetWindowPos(
             g_ddraw->hwnd,
@@ -770,7 +839,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
             0,
             g_ddraw->render.width,
             g_ddraw->render.height,
-            SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+            swp_flags);
 
         g_ddraw->last_set_window_pos_tick = timeGetTime();
 
@@ -804,7 +873,7 @@ HRESULT dd_SetDisplayMode(DWORD dwWidth, DWORD dwHeight, DWORD dwBPP, DWORD dwFl
 
 HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags)
 {
-    PIXELFORMATDESCRIPTOR pfd;
+    dbg_dump_scl_flags(dwFlags);
 
     if (hwnd == NULL)
     {
@@ -821,14 +890,16 @@ HRESULT dd_SetCooperativeLevel(HWND hwnd, DWORD dwFlags)
         hook_init();
 
         g_ddraw->wndproc = (WNDPROC)real_SetWindowLongA(g_ddraw->hwnd, GWL_WNDPROC, (LONG)fake_WndProc);
+        g_ddraw->gui_thread_id = GetWindowThreadProcessId(g_ddraw->hwnd, NULL);
 
         if (!g_ddraw->render.hdc)
         {
             g_ddraw->render.hdc = GetDC(g_ddraw->hwnd);
 
+            PIXELFORMATDESCRIPTOR pfd;
             memset(&pfd, 0, sizeof(PIXELFORMATDESCRIPTOR));
-
             pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
+
             pfd.nVersion = 1;
             pfd.dwFlags =
                 PFD_DRAW_TO_WINDOW | PFD_DOUBLEBUFFER | (g_ddraw->renderer == ogl_render_main ? PFD_SUPPORT_OPENGL : 0);
@@ -992,12 +1063,16 @@ ULONG dd_Release()
                 WaitForSingleObject(g_ddraw->render.thread, INFINITE);
                 g_ddraw->render.thread = NULL;
             }
+        }
 
+        if (!g_ddraw->windowed)
+        {
             if (g_ddraw->renderer == d3d9_render_main)
             {
-                d3d9_release();
+                if (!d3d9_reset(TRUE))
+                    d3d9_release();
             }
-            else if (!g_ddraw->windowed)
+            else
             {
                 ChangeDisplaySettings(NULL, 0);
             }
@@ -1096,6 +1171,7 @@ HRESULT dd_CreateEx(GUID* lpGuid, LPVOID* lplpDD, REFIID iid, IUnknown* pUnkOute
 
         g_ddraw->render.sem = CreateSemaphore(NULL, 0, 1, NULL);
         g_ddraw->wine = GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_version") != 0;
+        g_blt_use_avx = util_is_avx_supported();
 
         cfg_load();
         g_ddraw->ref--;

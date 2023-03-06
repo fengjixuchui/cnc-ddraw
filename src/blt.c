@@ -1,7 +1,90 @@
 #include <windows.h>
+#include <intrin.h>
 #include "debug.h"
 #include "blt.h"
 
+
+BOOL g_blt_use_avx;
+
+void blt_copy(
+    unsigned char* dst,
+    unsigned char* src,
+    size_t size)
+{
+#if defined(_MSC_VER) || defined(__AVX__)
+    if (!((DWORD)dst % 64) && !((DWORD)src % 64))
+    {
+        if (size >= 1024 * 4096 && g_blt_use_avx)
+        {
+            _mm_prefetch((const char*)(src), _MM_HINT_NTA);
+
+            while (size >= 256)
+            {
+                __m256i c0 = _mm256_load_si256(((const __m256i*)src) + 0);
+                __m256i c1 = _mm256_load_si256(((const __m256i*)src) + 1);
+                __m256i c2 = _mm256_load_si256(((const __m256i*)src) + 2);
+                __m256i c3 = _mm256_load_si256(((const __m256i*)src) + 3);
+                __m256i c4 = _mm256_load_si256(((const __m256i*)src) + 4);
+                __m256i c5 = _mm256_load_si256(((const __m256i*)src) + 5);
+                __m256i c6 = _mm256_load_si256(((const __m256i*)src) + 6);
+                __m256i c7 = _mm256_load_si256(((const __m256i*)src) + 7);
+
+                _mm_prefetch((const char*)(src + 512), _MM_HINT_NTA);
+
+                _mm256_stream_si256((((__m256i*)dst) + 0), c0);
+                _mm256_stream_si256((((__m256i*)dst) + 1), c1);
+                _mm256_stream_si256((((__m256i*)dst) + 2), c2);
+                _mm256_stream_si256((((__m256i*)dst) + 3), c3);
+                _mm256_stream_si256((((__m256i*)dst) + 4), c4);
+                _mm256_stream_si256((((__m256i*)dst) + 5), c5);
+                _mm256_stream_si256((((__m256i*)dst) + 6), c6);
+                _mm256_stream_si256((((__m256i*)dst) + 7), c7);
+
+                src += 256;
+                dst += 256;
+                size -= 256;
+            }
+
+            _mm_sfence();
+            _mm256_zeroupper();
+        }
+        else if (size < 1024 * 100 && g_blt_use_avx)
+        {
+            while (size >= 128)
+            {
+                __m256i c0 = _mm256_load_si256(((const __m256i*)src) + 0);
+                __m256i c1 = _mm256_load_si256(((const __m256i*)src) + 1);
+                __m256i c2 = _mm256_load_si256(((const __m256i*)src) + 2);
+                __m256i c3 = _mm256_load_si256(((const __m256i*)src) + 3);
+
+                _mm256_store_si256((((__m256i*)dst) + 0), c0);
+                _mm256_store_si256((((__m256i*)dst) + 1), c1);
+                _mm256_store_si256((((__m256i*)dst) + 2), c2);
+                _mm256_store_si256((((__m256i*)dst) + 3), c3);
+
+                src += 128;
+                dst += 128;
+                size -= 128;
+            }
+
+            _mm256_zeroupper();
+        }
+        else if (size >= 1024 * 100)
+        {
+            __movsb(dst, src, size);
+
+            size = 0;
+        }
+
+        /* memcpy below handles the remainder */
+    }
+#endif
+    
+    if (size > 0)
+    {
+        memcpy(dst, src, size);
+    }
+}
 
 void blt_clean(
     unsigned char* dst,
@@ -25,13 +108,13 @@ void blt_clean(
 
     if (size == dst_p && dst_p == src_p)
     {
-        memcpy(dst, src, dst_p * dst_h);
+        blt_copy(dst, src, dst_p * dst_h);
     }
     else
     {
         for (int i = 0; i < dst_h; i++)
         {
-            memcpy(dst, src, size);
+            blt_copy(dst, src, size);
 
             src += src_p;
             dst += dst_p;
@@ -118,9 +201,9 @@ void blt_colorkey(
 
         if (key_l == key_h)
         {
-            for (void* h_end = dst + dst_h * (dst_w + d_a); dst < h_end;)
+            for (unsigned char* h_end = dst + dst_h * (dst_w + d_a); dst < h_end;)
             {
-                for (void* w_end = dst + dst_w; dst < w_end;)
+                for (unsigned char* w_end = dst + dst_w; dst < w_end;)
                 {
                     unsigned char c = *src++;
 
@@ -138,9 +221,9 @@ void blt_colorkey(
         }
         else
         {
-            for (void* h_end = dst + dst_h * (dst_w + d_a); dst < h_end;)
+            for (unsigned char* h_end = dst + dst_h * (dst_w + d_a); dst < h_end;)
             {
-                for (void* w_end = dst + dst_w; dst < w_end;)
+                for (unsigned char* w_end = dst + dst_w; dst < w_end;)
                 {
                     unsigned char c = *src++;
 
@@ -167,9 +250,9 @@ void blt_colorkey(
 
         if (key_l == key_h)
         {
-            for (void* h_end = d + dst_h * (dst_w + d_a); d < h_end;)
+            for (unsigned short* h_end = d + dst_h * (dst_w + d_a); d < h_end;)
             {
-                for (void* w_end = d + dst_w; d < w_end;)
+                for (unsigned short* w_end = d + dst_w; d < w_end;)
                 {
                     unsigned short c = *s++;
 
@@ -187,9 +270,9 @@ void blt_colorkey(
         }
         else
         {
-            for (void* h_end = d + dst_h * (dst_w + d_a); d < h_end;)
+            for (unsigned short* h_end = d + dst_h * (dst_w + d_a); d < h_end;)
             {
-                for (void* w_end = d + dst_w; d < w_end;)
+                for (unsigned short* w_end = d + dst_w; d < w_end;)
                 {
                     unsigned short c = *s++;
 
@@ -208,21 +291,21 @@ void blt_colorkey(
     }
     else if (bpp == 32)
     {
-        unsigned int key_l = (unsigned int)key_low;
-        unsigned int key_h = (unsigned int)key_high;
+        unsigned int key_l = key_low & 0xFFFFFF;
+        unsigned int key_h = key_high & 0xFFFFFF;
 
         unsigned int* d = (unsigned int*)dst;
         unsigned int* s = (unsigned int*)src;
 
         if (key_l == key_h)
         {
-            for (void* h_end = d + dst_h * (dst_w + d_a); d < h_end;)
+            for (unsigned int* h_end = d + dst_h * (dst_w + d_a); d < h_end;)
             {
-                for (void* w_end = d + dst_w; d < w_end;)
+                for (unsigned int* w_end = d + dst_w; d < w_end;)
                 {
                     unsigned int c = *s++;
 
-                    if (c != key_l)
+                    if ((c & 0xFFFFFF) != key_l)
                     {
                         *d = c;
                     }
@@ -236,13 +319,13 @@ void blt_colorkey(
         }
         else
         {
-            for (void* h_end = d + dst_h * (dst_w + d_a); d < h_end;)
+            for (unsigned int* h_end = d + dst_h * (dst_w + d_a); d < h_end;)
             {
-                for (void* w_end = d + dst_w; d < w_end;)
+                for (unsigned int* w_end = d + dst_w; d < w_end;)
                 {
                     unsigned int c = *s++;
 
-                    if (c < key_l || c > key_h)
+                    if ((c & 0xFFFFFF) < key_l || (c & 0xFFFFFF) > key_h)
                     {
                         *d = c;
                     }
@@ -348,8 +431,8 @@ void blt_colorkey_mirror_stretch(
     }
     else if (bpp == 32)
     {
-        unsigned int key_l = (unsigned int)key_low;
-        unsigned int key_h = (unsigned int)key_high;
+        unsigned int key_l = key_low & 0xFFFFFF;
+        unsigned int key_h = key_high & 0xFFFFFF;
 
         for (int y = 0; y < dst_h; y++)
         {
@@ -370,12 +453,49 @@ void blt_colorkey_mirror_stretch(
 
                 unsigned int c = ((unsigned int*)src)[scaled_x + src_row];
 
-                if (c < key_l || c > key_h)
+                if ((c & 0xFFFFFF) < key_l || (c & 0xFFFFFF) > key_h)
                 {
                     ((unsigned int*)dst)[x + dst_row] = c;
                 }
             }
         }
+    }
+}
+
+void blt_clear(
+    unsigned char* dst,
+    char color,
+    size_t size)
+{
+#if defined(_MSC_VER) || defined(__AVX__)
+    if (size < 1024 * 100 && g_blt_use_avx && !((DWORD)dst % 32))
+    {
+        __m256i c0 = _mm256_set1_epi8(color);
+
+        while (size >= 128)
+        {
+            _mm256_store_si256((((__m256i*)dst) + 0), c0);
+            _mm256_store_si256((((__m256i*)dst) + 1), c0);
+            _mm256_store_si256((((__m256i*)dst) + 2), c0);
+            _mm256_store_si256((((__m256i*)dst) + 3), c0);
+
+            dst += 128;
+            size -= 128;
+        }
+
+        _mm256_zeroupper();
+
+        /* memset below handles the remainder */
+    }
+#endif
+
+    if (size >= 1024 * 100)
+    {
+        __stosb(dst, color, size);
+    }
+    else
+    {
+        memset(dst, color, size);
     }
 }
 
@@ -405,13 +525,13 @@ void blt_colorfill(
     {
         if (size == dst_p)
         {
-            memset(dst, color, dst_p * dst_h);
+            blt_clear(dst, color, dst_p * dst_h);
         }
         else
         {
             for (int i = 0; i < dst_h; i++)
             {
-                memset(dst, color, size);
+                blt_clear(dst, color, size);
                 dst += dst_p;
             }
         }
@@ -428,7 +548,7 @@ void blt_colorfill(
         for (int i = 1; i < dst_h; i++)
         {
             dst += dst_p;
-            memcpy(dst, first_row, size);
+            blt_copy(dst, (void*)first_row, size);
         }
     }
     else if (bpp == 32)
@@ -443,7 +563,7 @@ void blt_colorfill(
         for (int i = 1; i < dst_h; i++)
         {
             dst += dst_p;
-            memcpy(dst, first_row, size);
+            blt_copy(dst, (void*)first_row, size);
         }
     }
 }
@@ -463,12 +583,12 @@ void blt_rgb565_to_rgba8888(
     size_t s_a = (src_p / sizeof(src[0])) - dst_w;
     size_t d_a = (dst_p / sizeof(dst[0])) - dst_w;
 
-    src += (src_x * sizeof(src[0])) + (src_p * src_y);
-    dst += (dst_x * sizeof(dst[0])) + (dst_p * dst_y);
+    src += src_x + ((src_p / sizeof(src[0])) * src_y);
+    dst += dst_x + ((dst_p / sizeof(dst[0])) * dst_y);
 
-    for (void* h_end = dst + dst_h * (dst_w + d_a); dst < h_end;)
+    for (unsigned int* h_end = dst + dst_h * (dst_w + d_a); dst < h_end;)
     {
-        for (void* w_end = dst + dst_w; dst < w_end;)
+        for (unsigned int* w_end = dst + dst_w; dst < w_end;)
         {
             unsigned short pixel = *src++;
 
@@ -499,12 +619,12 @@ void blt_bgra8888_to_rgba8888(
     size_t s_a = (src_p / sizeof(src[0])) - dst_w;
     size_t d_a = (dst_p / sizeof(dst[0])) - dst_w;
 
-    src += (src_x * sizeof(src[0])) + (src_p * src_y);
-    dst += (dst_x * sizeof(dst[0])) + (dst_p * dst_y);
+    src += src_x + ((src_p / sizeof(src[0])) * src_y);
+    dst += dst_x + ((dst_p / sizeof(dst[0])) * dst_y);
 
-    for (void* h_end = dst + dst_h * (dst_w + d_a); dst < h_end;)
+    for (unsigned int* h_end = dst + dst_h * (dst_w + d_a); dst < h_end;)
     {
-        for (void* w_end = dst + dst_w; dst < w_end;)
+        for (unsigned int* w_end = dst + dst_w; dst < w_end;)
         {
             unsigned int pixel = *src++;
 
@@ -560,7 +680,7 @@ void blt_stretch(
 
             if (scaled_y == last_y)
             {
-                memcpy(&d[dst_row], &d[last_row], size);
+                blt_copy(&d[dst_row], &d[last_row], size);
                 continue;
             }
 
@@ -589,7 +709,7 @@ void blt_stretch(
 
             if (scaled_y == last_y)
             {
-                memcpy(&d[dst_row], &d[last_row], size);
+                blt_copy((void*)&d[dst_row], (void*)&d[last_row], size);
                 continue;
             }
 
@@ -618,7 +738,7 @@ void blt_stretch(
 
             if (scaled_y == last_y)
             {
-                memcpy(&d[dst_row], &d[last_row], size);
+                blt_copy((void*)&d[dst_row], (void*)&d[last_row], size);
                 continue;
             }
 

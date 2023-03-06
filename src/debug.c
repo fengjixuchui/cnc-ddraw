@@ -46,6 +46,26 @@ int dbg_exception_handler(EXCEPTION_POINTERS* exception)
         CloseHandle(dmp);
     }
 
+    if (exception && exception->ExceptionRecord)
+    {
+        HMODULE mod = NULL;
+        char filename[MAX_PATH] = { 0 };
+
+        if (GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            exception->ExceptionRecord->ExceptionAddress,
+            &mod))
+        {
+            GetModuleFileNameA(mod, filename, sizeof(filename) - 1);
+        }
+
+        TRACE(
+            "Exception at %p (%08X) %s\n",
+            exception->ExceptionRecord->ExceptionAddress,
+            exception->ExceptionRecord->ExceptionCode,
+            filename);
+    }
+
     return EXCEPTION_EXECUTE_HANDLER;
 }
 #endif
@@ -75,13 +95,15 @@ void dbg_init()
             DWORD build_size = sizeof(build);
             RegQueryValueExA(hkey, "BuildLab", NULL, NULL, (PVOID)&build, &build_size);
 
-            dbg_printf("%s (%s)\n", name, build);
+            TRACE("%s (%s)\n", name, build);
 
             const char* (CDECL * wine_get_version)() =
                 (void*)GetProcAddress(GetModuleHandleA("ntdll.dll"), "wine_get_version");
 
             if (wine_get_version)
-                dbg_printf("Wine version = %s\n", wine_get_version());
+            {
+                TRACE("Wine version = %s\n", wine_get_version());
+            }
         }
     }
 }
@@ -150,6 +172,24 @@ int dbg_printf(const char* fmt, ...)
     return ret;
 }
 
+void dbg_print_rect(char* info, LPRECT rect)
+{
+#ifdef _DEBUG_X
+    if (rect)
+    {
+        TRACE(
+            "     %s: l=%d, t=%d, r=%d, b=%d (%dx%d)\n", 
+            info, 
+            rect->left, 
+            rect->top, 
+            rect->right, 
+            rect->bottom, 
+            rect->right - rect->left, 
+            rect->bottom - rect->top);
+    }
+#endif
+}
+
 void dbg_draw_frame_info_start()
 {
     static DWORD tick_fps = 0;
@@ -188,6 +228,132 @@ void dbg_draw_frame_info_end()
 {
     if (g_dbg_frame_count == 1)
         g_dbg_frame_time = dbg_counter_stop();
+}
+
+void dbg_dump_ddp_flags(DWORD flags)
+{
+#ifdef _DEBUG
+    if (flags & DDPCAPS_4BIT) {
+        TRACE("     DDPCAPS_4BIT\n");
+    }
+    if (flags & DDPCAPS_8BITENTRIES) {
+        TRACE("     DDPCAPS_8BITENTRIES\n");
+    }
+    if (flags & DDPCAPS_8BIT) {
+        TRACE("     DDPCAPS_8BIT\n");
+    }
+    if (flags & DDPCAPS_INITIALIZE) {
+        TRACE("     DDPCAPS_INITIALIZE\n");
+    }
+    if (flags & DDPCAPS_PRIMARYSURFACE) {
+        TRACE("     DDPCAPS_PRIMARYSURFACE\n");
+    }
+    if (flags & DDPCAPS_PRIMARYSURFACELEFT) {
+        TRACE("     DDPCAPS_PRIMARYSURFACELEFT\n");
+    }
+    if (flags & DDPCAPS_ALLOW256) {
+        TRACE("     DDPCAPS_ALLOW256\n");
+    }
+    if (flags & DDPCAPS_VSYNC) {
+        TRACE("     DDPCAPS_VSYNC\n");
+    }
+    if (flags & DDPCAPS_1BIT) {
+        TRACE("     DDPCAPS_1BIT\n");
+    }
+    if (flags & DDPCAPS_2BIT) {
+        TRACE("     DDPCAPS_2BIT\n");
+    }
+    if (flags & DDPCAPS_ALPHA) {
+        TRACE("     DDPCAPS_ALPHA\n");
+    }
+#endif
+}
+
+void dbg_dump_scl_flags(DWORD flags)
+{
+#ifdef _DEBUG
+    if (flags & DDSCL_FULLSCREEN) {
+        TRACE("     DDSCL_FULLSCREEN\n");
+    }
+    if (flags & DDSCL_ALLOWREBOOT) {
+        TRACE("     DDSCL_ALLOWREBOOT\n");
+    }
+    if (flags & DDSCL_NOWINDOWCHANGES) {
+        TRACE("     DDSCL_NOWINDOWCHANGES\n");
+    }
+    if (flags & DDSCL_NORMAL) {
+        TRACE("     DDSCL_NORMAL\n");
+    }
+    if (flags & DDSCL_EXCLUSIVE) {
+        TRACE("     DDSCL_EXCLUSIVE\n");
+    }
+    if (flags & DDSCL_ALLOWMODEX) {
+        TRACE("     DDSCL_ALLOWMODEX\n");
+    }
+    if (flags & DDSCL_SETFOCUSWINDOW) {
+        TRACE("     DDSCL_SETFOCUSWINDOW\n");
+    }
+    if (flags & DDSCL_SETDEVICEWINDOW) {
+        TRACE("     DDSCL_SETDEVICEWINDOW\n");
+    }
+    if (flags & DDSCL_CREATEDEVICEWINDOW) {
+        TRACE("     DDSCL_CREATEDEVICEWINDOW\n");
+    }
+    if (flags & DDSCL_MULTITHREADED) {
+        TRACE("     DDSCL_MULTITHREADED\n");
+    }
+    if (flags & DDSCL_FPUSETUP) {
+        TRACE("     DDSCL_FPUSETUP\n");
+    }
+    if (flags & DDSCL_FPUPRESERVE) {
+        TRACE("     DDSCL_FPUPRESERVE\n");
+    }
+#endif
+}
+
+void dbg_dump_edm_flags(DWORD flags)
+{
+#ifdef _DEBUG
+    if (flags & DDEDM_REFRESHRATES) {
+        TRACE("     DDEDM_REFRESHRATES\n");
+    }
+    if (flags & DDEDM_STANDARDVGAMODES) {
+        TRACE("     DDEDM_STANDARDVGAMODES\n");
+    }
+#endif
+}
+
+void dbg_dump_dds_flip_flags(DWORD flags)
+{
+#ifdef _DEBUG_X
+    if (flags & DDFLIP_WAIT) {
+        TRACE("     DDFLIP_WAIT\n");
+    }
+    if (flags & DDFLIP_EVEN) {
+        TRACE("     DDFLIP_EVEN\n");
+    }
+    if (flags & DDFLIP_ODD) {
+        TRACE("     DDFLIP_ODD\n");
+    }
+    if (flags & DDFLIP_NOVSYNC) {
+        TRACE("     DDFLIP_NOVSYNC\n");
+    }
+    if (flags & DDFLIP_INTERVAL2) {
+        TRACE("     DDFLIP_INTERVAL2\n");
+    }
+    if (flags & DDFLIP_INTERVAL3) {
+        TRACE("     DDFLIP_INTERVAL3\n");
+    }
+    if (flags & DDFLIP_INTERVAL4) {
+        TRACE("     DDFLIP_INTERVAL4\n");
+    }
+    if (flags & DDFLIP_STEREO) {
+        TRACE("     DDFLIP_STEREO\n");
+    }
+    if (flags & DDFLIP_DONOTWAIT) {
+        TRACE("     DDFLIP_DONOTWAIT\n");
+    }
+#endif
 }
 
 void dbg_dump_dds_blt_flags(DWORD flags)
@@ -1223,6 +1389,9 @@ char* dbg_mes_to_str(int id)
     case WM_DISPLAYCHANGE_DDRAW: return "WM_DISPLAYCHANGE_DDRAW";
     case WM_SIZE_DDRAW: return "WM_SIZE_DDRAW";
     case WM_MOVE_DDRAW: return "WM_MOVE_DDRAW";
+    case WM_D3D9DEVICELOST: return "WM_D3D9DEVICELOST";
+    case WM_WINEFULLSCREEN: return "WM_WINEFULLSCREEN";
+    case WM_AUTORENDERER: return "WM_AUTORENDERER";
     }
 
     return 0;
